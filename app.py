@@ -81,288 +81,50 @@ def check_rate_limit():
 
 # Page configuration
 st.set_page_config(
-    page_title="Murali's Medicare Policy Assistant | GraphRAG Demo",
+    page_title="Medicare Policy Assistant",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Slick Dark Theme
+# Custom CSS for better UI
 st.markdown("""
 <style>
-    /* Import clean system fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    
-    /* Main app background - Charcoal */
-    .stApp {
-        background-color: #0E0E0E;
-    }
-    
-    /* Main container with subtle glow */
-    .main .block-container {
-        background-color: #1A1A1A;
-        padding: 2rem;
-        border-radius: 12px;
-        box-shadow: 0 0 30px rgba(34, 197, 94, 0.15);
-        border: 1px solid rgba(34, 197, 94, 0.2);
-    }
-    
-    /* Header styling */
     .main-header {
-        font-size: 2.2rem;
+        font-size: 2.5rem;
         font-weight: 700;
-        color: #FFFFFF;
+        color: #1f77b4;
         margin-bottom: 0.5rem;
-        text-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
     }
-    
     .sub-header {
-        font-size: 1rem;
-        color: #A0A0A0;
+        font-size: 1.1rem;
+        color: #666;
         margin-bottom: 2rem;
-        font-weight: 400;
     }
-    
-    /* Source boxes */
     .source-box {
-        background-color: #1F1F1F;
-        border-left: 4px solid #22C55E;
+        background-color: #f0f2f6;
+        border-left: 4px solid #1f77b4;
         padding: 1rem;
         margin: 0.5rem 0;
-        border-radius: 8px;
-        color: #E0E0E0;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        border-radius: 4px;
     }
-    
-    /* Entity tags with dark theme */
     .entity-tag {
         display: inline-block;
-        padding: 0.35rem 0.85rem;
+        padding: 0.25rem 0.75rem;
         margin: 0.25rem;
-        border-radius: 16px;
+        border-radius: 12px;
         font-size: 0.85rem;
         font-weight: 600;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     }
-    
-    .entity-policy { 
-        background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-        color: #FFFFFF;
-    }
-    .entity-procedure { 
-        background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
-        color: #FFFFFF;
-    }
-    .entity-organization { 
-        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-        color: #FFFFFF;
-    }
-    .entity-condition { 
-        background: linear-gradient(135deg, #ea580c 0%, #fb923c 100%);
-        color: #FFFFFF;
-    }
-    .entity-demographic { 
-        background: linear-gradient(135deg, #db2777 0%, #f472b6 100%);
-        color: #FFFFFF;
-    }
-    
+    .entity-policy { background-color: #e3f2fd; color: #1976d2; }
+    .entity-procedure { background-color: #f3e5f5; color: #7b1fa2; }
+    .entity-organization { background-color: #e8f5e9; color: #388e3c; }
+    .entity-condition { background-color: #fff3e0; color: #f57c00; }
+    .entity-demographic { background-color: #fce4ec; color: #c2185b; }
     .relation-arrow {
-        color: #22C55E;
+        color: #1f77b4;
         font-weight: bold;
         margin: 0 0.5rem;
-    }
-    
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {
-        background-color: #0E0E0E;
-        border-right: 1px solid rgba(34, 197, 94, 0.2);
-    }
-    
-    section[data-testid="stSidebar"] > div {
-        background-color: #0E0E0E;
-    }
-    
-    /* Text colors */
-    .stMarkdown, p, span, div {
-        color: #E0E0E0 !important;
-    }
-    
-    h1, h2, h3, h4, h5, h6 {
-        color: #FFFFFF !important;
-    }
-    
-    /* Input fields */
-    .stTextInput > div > div > input {
-        background-color: #1F1F1F !important;
-        color: #FFFFFF !important;
-        border: 1px solid #2A2A2A !important;
-        border-radius: 8px !important;
-    }
-    
-    .stTextInput > div > div > input:focus {
-        border-color: #22C55E !important;
-        box-shadow: 0 0 0 1px #22C55E !important;
-    }
-    
-    /* Selectbox styling */
-    .stSelectbox > div > div {
-        background-color: #1F1F1F !important;
-        color: #FFFFFF !important;
-        border: 1px solid #2A2A2A !important;
-        border-radius: 8px !important;
-    }
-    
-    /* Button styling - Gray with White Text */
-    .stButton > button {
-        background: linear-gradient(135deg, #4B5563 0%, #374151 100%) !important;
-        color: #FFFFFF !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stButton > button:hover {
-        background: linear-gradient(135deg, #374151 0%, #1F2937 100%) !important;
-        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3) !important;
-        transform: translateY(-2px) !important;
-    }
-    
-    /* Download button */
-    .stDownloadButton > button {
-        background: linear-gradient(135deg, #4B5563 0%, #374151 100%) !important;
-        color: #FFFFFF !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
-    }
-    
-    .stDownloadButton > button:hover {
-        background: linear-gradient(135deg, #374151 0%, #1F2937 100%) !important;
-        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3) !important;
-    }
-    
-    /* Form submit button - Primary */
-    button[kind="primary"] {
-        background: linear-gradient(135deg, #4B5563 0%, #374151 100%) !important;
-        color: #FFFFFF !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
-    }
-    
-    button[kind="primary"]:hover {
-        background: linear-gradient(135deg, #374151 0%, #1F2937 100%) !important;
-        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3) !important;
-    }
-    
-    /* Metrics */
-    div[data-testid="stMetricValue"] {
-        color: #22C55E !important;
-        font-weight: 700 !important;
-    }
-    
-    div[data-testid="stMetricLabel"] {
-        color: #A0A0A0 !important;
-    }
-    
-    /* Expander */
-    .streamlit-expanderHeader {
-        background-color: #1F1F1F !important;
-        color: #FFFFFF !important;
-        border: 1px solid #2A2A2A !important;
-        border-radius: 8px !important;
-    }
-    
-    .streamlit-expanderHeader:hover {
-        border-color: #22C55E !important;
-    }
-    
-    .streamlit-expanderContent {
-        background-color: #1A1A1A !important;
-        border: 1px solid #2A2A2A !important;
-        color: #E0E0E0 !important;
-    }
-    
-    /* Info boxes */
-    .stInfo {
-        background-color: #1F1F1F !important;
-        border-left: 4px solid #22C55E !important;
-        color: #E0E0E0 !important;
-    }
-    
-    .stWarning {
-        background-color: #2A1F1A !important;
-        border-left: 4px solid #f59e0b !important;
-        color: #fbbf24 !important;
-    }
-    
-    .stError {
-        background-color: #2A1A1A !important;
-        border-left: 4px solid #ef4444 !important;
-        color: #fca5a5 !important;
-    }
-    
-    /* Spinner */
-    .stSpinner > div {
-        border-top-color: #22C55E !important;
-    }
-    
-    /* Radio buttons */
-    .stRadio > label {
-        color: #E0E0E0 !important;
-    }
-    
-    /* Divider */
-    hr {
-        border-color: #2A2A2A !important;
-    }
-    
-    /* Caption text */
-    .stCaption {
-        color: #A0A0A0 !important;
-    }
-    
-    /* Links */
-    a {
-        color: #22C55E !important;
-        text-decoration: none !important;
-    }
-    
-    a:hover {
-        color: #16a34a !important;
-        text-decoration: underline !important;
-    }
-    
-    /* Code blocks */
-    code {
-        background-color: #1F1F1F !important;
-        color: #22C55E !important;
-        padding: 0.2rem 0.4rem !important;
-        border-radius: 4px !important;
-    }
-    
-    /* Scrollbar */
-    ::-webkit-scrollbar {
-        width: 10px;
-        height: 10px;
-    }
-    
-    ::-webkit-scrollbar-track {
-        background: #1A1A1A;
-    }
-    
-    ::-webkit-scrollbar-thumb {
-        background: #2A2A2A;
-        border-radius: 5px;
-    }
-    
-    ::-webkit-scrollbar-thumb:hover {
-        background: #22C55E;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -373,41 +135,30 @@ st.markdown("""
 
 @st.cache_resource
 def initialize_openai_client():
-    """Initialize OpenAI client using Streamlit secrets."""
+    """Initialize OpenAI client for Databricks serving endpoints."""
     try:
-        # Option 1: Use Databricks (if credentials provided)
-        if "DATABRICKS_TOKEN" in st.secrets and "DATABRICKS_HOST" in st.secrets:
-            client = OpenAI(
-                api_key=st.secrets["DATABRICKS_TOKEN"],
-                base_url=f"{st.secrets['DATABRICKS_HOST']}/serving-endpoints"
-            )
-            return client
+        from databricks.sdk import WorkspaceClient
         
-        # Option 2: Use OpenAI directly (fallback)
-        elif "OPENAI_API_KEY" in st.secrets:
-            client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-            st.warning("⚠️ Using OpenAI API instead of Databricks. Some features may differ.")
-            return client
+        # Use Databricks SDK for authentication (handles credentials automatically)
+        w = WorkspaceClient()
         
-        else:
-            st.error("❌ Missing API credentials. Please configure secrets in Streamlit Cloud.")
-            st.info("""
-            Required secrets (add in Streamlit Cloud dashboard):
-            - DATABRICKS_TOKEN (your Databricks personal access token)
-            - DATABRICKS_HOST (e.g., https://your-workspace.cloud.databricks.com)
-            
-            OR use OpenAI:
-            - OPENAI_API_KEY (your OpenAI API key)
-            """)
-            return None
+        # Get workspace info
+        workspace_url = w.config.host.replace("https://", "")
+        token = w.config.token or w.config.authenticate()
+        
+        client = OpenAI(
+            api_key=token,
+            base_url=f"https://{workspace_url}/serving-endpoints"
+        )
+        return client
     except Exception as e:
-        st.error(f"Failed to initialize client: {e}")
+        st.error(f"Failed to initialize OpenAI client: {e}")
         return None
 
 @st.cache_data
 def load_knowledge_graph():
     """Load knowledge graph data from Unity Catalog Volumes."""
-    output_path = "data"  # Local data folder
+    output_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
     
     try:
         entities_df = pd.read_parquet(f"{output_path}/entities.parquet")
@@ -636,7 +387,7 @@ If the excerpts don't contain enough information, say so clearly."""
     
     try:
         response = client.chat.completions.create(
-            model=st.secrets.get("MODEL_NAME", "databricks-meta-llama-3-3-70b-instruct"),
+            model="databricks-meta-llama-3-3-70b-instruct",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -676,7 +427,7 @@ Cite specific relationships and passages."""
     
     try:
         response = client.chat.completions.create(
-            model=st.secrets.get("MODEL_NAME", "databricks-meta-llama-3-3-70b-instruct"),
+            model="databricks-meta-llama-3-3-70b-instruct",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -708,9 +459,7 @@ def render_relationship(rel: Dict):
 
 def render_text_chunk(chunk: Dict, index: int, query: str):
     """Render a text chunk with highlighting."""
-    score = chunk.get('score', 0)
-    score_str = f"{score:.2f}" if isinstance(score, (int, float)) else "N/A"
-    st.markdown(f"**📄 Source {index + 1}** (Score: {score_str})")
+    st.markdown(f"**📄 Source {index + 1}** (Score: {chunk.get('score', 'N/A'):.2f})")
     
     # Highlight query terms
     query_words = query.lower().split()
@@ -725,114 +474,10 @@ def render_text_chunk(chunk: Dict, index: int, query: str):
 # MAIN APPLICATION
 # ============================================================================
 
-
-def create_export_text(query: str, answer: str, sources: List[Dict], mode: str) -> str:
-    """Create formatted text for export."""
-    export_lines = [
-        "="*70,
-        "MEDICARE POLICY RESEARCH ASSISTANT - QUERY RESULTS",
-        "="*70,
-        "",
-        f"Query: {query}",
-        f"Search Mode: {mode}",
-        f"Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "",
-        "="*70,
-        "ANSWER",
-        "="*70,
-        "",
-        answer,
-        "",
-        "="*70,
-        "SOURCES",
-        "="*70,
-        ""
-    ]
-    
-    for i, source in enumerate(sources, 1):
-        export_lines.append(f"\n[Source {i}]")
-        if 'score' in source:
-            export_lines.append(f"Relevance Score: {source.get('score', 'N/A')}")
-        export_lines.append(f"Document ID: {source.get('document_id', 'unknown')}")
-        export_lines.append(f"Text: {source.get('text', '')}\n")
-        export_lines.append("-"*70)
-    
-    export_lines.extend([
-        "",
-        "="*70,
-        "TECHNICAL DETAILS",
-        "="*70,
-        "",
-        "Application: Murali's Medicare Policy Assistant (GraphRAG Demo)",
-        "Data Source: CMS Medicare Coverage Database (56 documents)",
-        "Knowledge Graph: 241 entities, 311 relationships (built with Microsoft GraphRAG + GPT-4)",
-        "Runtime LLM: Llama 3.3 70B Instruct (Databricks Foundation Models)",
-        "Built by: Murali Menon",
-        "",
-        "="*70
-    ])
-    
-    return "\n".join(export_lines)
-
 def main():
     # Header
-    st.markdown("<div class='main-header'>🏥 Murali's Medicare Policy Assistant</div>", unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🏥 Medicare Policy Research Assistant</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">GraphRAG-powered search across CMS Medicare Coverage Database</div>', unsafe_allow_html=True)
-    
-    # Demo disclaimer and technical info
-    with st.expander("ℹ️ About This Project", expanded=False):
-        st.markdown("""
-        ### 🎓 Educational Demo Project
-        
-        This application demonstrates the power of **GraphRAG (Graph Retrieval-Augmented Generation)** 
-        for intelligent document search and question answering.
-        
-        ### 🔬 Technical Stack
-        
-        **Knowledge Graph Generation:**
-        - Framework: Microsoft GraphRAG
-        - Entity Extraction: GPT-4 (via Azure OpenAI)
-        - Documents: 56 CMS Medicare policy documents
-        - Output: 241 entities, 311 relationships, 318 text chunks
-        
-        **Runtime Query Processing:**
-        - LLM: Llama 3.3 70B Instruct (Databricks Foundation Models)
-        - Serving: Databricks Model Serving Endpoints
-        - Search Modes: Direct text search + Graph-based relationship analysis
-        
-        **Data Source:**
-        - CMS Medicare Coverage Database
-        - Focus: National Coverage Determinations (NCDs), preventive services, screening procedures
-        
-        ### 🎯 Purpose
-        
-        This demo showcases how GraphRAG can:
-        - Extract structured knowledge from unstructured policy documents
-        - Enable relationship-based queries (not just keyword search)
-        - Provide transparent, source-attributed answers
-        - Scale to large document collections
-        
-        ### ⚠️ Disclaimer
-        
-        This is a **demonstration project** for educational and portfolio purposes. 
-        For official Medicare policy guidance, please consult [cms.gov](https://www.cms.gov).
-        
-        ### 👤 Built By
-        
-        **Murali Menon**
-        
-        ---
-        
-        *Built with Streamlit | Deployed on Streamlit Cloud | Knowledge Base stored in Databricks Unity Catalog*
-        """)
-    
-    # Initialize session state
-    if 'search_history' not in st.session_state:
-        st.session_state.search_history = []
-    if 'last_result' not in st.session_state:
-        st.session_state.last_result = None
-    if 'bookmarks' not in st.session_state:
-        st.session_state.bookmarks = []
     
     # Initialize
     client = initialize_openai_client()
@@ -860,69 +505,40 @@ def main():
         st.metric("Text Chunks", len(kg_data["text_units"]))
         
         st.divider()
-
-        
-        # Search History
-        if st.session_state.search_history:
-            with st.expander("🕐 Search History"):
-                st.caption(f"{len(st.session_state.search_history)} recent queries")
-                for i, past_query in enumerate(reversed(st.session_state.search_history[-10:])):
-                    if st.button(f"📌 {past_query[:50]}...", key=f"history_{i}"):
-                        st.session_state.reload_query = past_query
-                        st.rerun()
-            
-            st.divider()
         
         st.subheader("💡 Example Questions")
         if search_mode == "Standard Search":
             st.markdown("""
-            - What are the lung cancer screening requirements?
+            - What are lung cancer screening NCD requirements?
             - List HCPCS codes for preventive services
-            - Describe Medicare prescription drug coverage
-            - What are the coverage requirements for LDCT screening?
+            - What contractors administer NCDs in California?
             """)
         else:
             st.markdown("""
-            - How are Medicare preventive services and CMS connected?
+            - How are NCDs and contractors connected?
             - What policies affect Medicare beneficiaries?
-            - How are screening procedures and USPSTF related?
-            - What is the National Coverage Determination for lung cancer screening?
+            - How are preventive services and screening related?
             """)
     
     # Main chat interface
     st.header("💬 Ask a Question")
     
-    # Check if reloading from history
-    default_query = ""
-    if 'reload_query' in st.session_state and st.session_state.reload_query:
-        default_query = st.session_state.reload_query
-        # Clear it after using (but only after form submission)
-        # Don't delete here - it breaks form submission!
+    query = st.text_input(
+        "Enter your question:",
+        placeholder="e.g., What are the requirements for lung cancer screening?",
+        label_visibility="collapsed"
+    )
     
-    # Use a form so Enter key triggers search
-    with st.form(key="search_form", clear_on_submit=False):
-        query = st.text_input(
-            "Enter your question:",
-            value=default_query,
-            placeholder="e.g., What are the requirements for lung cancer screening? (Press Enter to search)",
-            label_visibility="collapsed"
-        )
-        
-        # Search button (full width, no Clear button needed)
-        search_button = st.form_submit_button("🔍 Search", type="primary", use_container_width=True)
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        search_button = st.button("🔍 Search", type="primary", use_container_width=True)
+    with col2:
+        clear_button = st.button("🗑️ Clear", use_container_width=True)
+    
+    if clear_button:
+        st.rerun()
     
     if search_button and query:
-        # Clear reload_query now that we're searching
-        if 'reload_query' in st.session_state:
-            st.session_state.reload_query = ""
-        
-        # Add to search history
-        if query not in st.session_state.search_history:
-            st.session_state.search_history.append(query)
-            # Keep only last 50 queries
-            if len(st.session_state.search_history) > 50:
-                st.session_state.search_history = st.session_state.search_history[-50:]
-        
         # Rate limiting check
         check_rate_limit()
         
@@ -939,29 +555,9 @@ def main():
                     # Generate answer
                     answer = generate_answer_direct(query, chunks, client)
                     
-                    # Save to session state
-                    st.session_state.last_result = {
-                        'query': query,
-                        'answer': answer,
-                        'sources': chunks,
-                        'mode': 'Standard Search'
-                    }
-                    
                     # Display answer
                     st.markdown("### 💡 Answer")
                     st.info(answer)
-                    
-                    # Export button
-                    col1, col2 = st.columns([1, 4])
-                    with col1:
-                        export_text = create_export_text(query, answer, chunks, "Standard Search")
-                        st.download_button(
-                            label="📥 Export",
-                            data=export_text,
-                            file_name=f"medicare_policy_{query[:30].replace(' ', '_')}.txt",
-                            mime="text/plain",
-                            help="Download this answer and sources as a text file"
-                        )
                     
                     # Display sources
                     st.markdown("### 📚 Source Text Chunks")
@@ -998,29 +594,9 @@ def main():
                         # Generate answer
                         answer = generate_answer_graph(query, entities, relationships, chunks, client)
                         
-                        # Save to session state
-                        st.session_state.last_result = {
-                            'query': query,
-                            'answer': answer,
-                            'sources': chunks,
-                            'mode': 'Relationship Analysis'
-                        }
-                        
                         # Display answer
                         st.markdown("### 💡 Answer")
                         st.info(answer)
-                        
-                        # Export button
-                        col1, col2 = st.columns([1, 4])
-                        with col1:
-                            export_text = create_export_text(query, answer, chunks, "Relationship Analysis")
-                            st.download_button(
-                                label="📥 Export",
-                                data=export_text,
-                                file_name=f"medicare_policy_{query[:30].replace(' ', '_')}.txt",
-                                mime="text/plain",
-                                help="Download this answer and sources as a text file"
-                            )
                         
                         # Display relationships
                         st.markdown(f"### 🔗 Knowledge Graph Relationships ({len(relationships)} found)")

@@ -87,81 +87,276 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI
+# Custom CSS - Slick Dark Theme
 st.markdown("""
 <style>
     /* Import clean system fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
     * {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     
+    /* Main app background - Charcoal */
+    .stApp {
+        background-color: #0E0E0E;
+    }
+    
+    /* Main container with subtle glow */
+    .main .block-container {
+        background-color: #1A1A1A;
+        padding: 2rem;
+        border-radius: 12px;
+        box-shadow: 0 0 30px rgba(34, 197, 94, 0.15);
+        border: 1px solid rgba(34, 197, 94, 0.2);
+    }
+    
+    /* Header styling */
     .main-header {
         font-size: 2.2rem;
-        font-weight: 600;
-        color: #1f77b4;
+        font-weight: 700;
+        color: #FFFFFF;
         margin-bottom: 0.5rem;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        text-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
     }
+    
     .sub-header {
         font-size: 1rem;
-        color: #555;
+        color: #A0A0A0;
         margin-bottom: 2rem;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-weight: 400;
     }
+    
+    /* Source boxes */
     .source-box {
-        background-color: #f0f2f6;
-        border-left: 4px solid #1f77b4;
+        background-color: #1F1F1F;
+        border-left: 4px solid #22C55E;
         padding: 1rem;
         margin: 0.5rem 0;
-        border-radius: 4px;
-        color: #333;
+        border-radius: 8px;
+        color: #E0E0E0;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
+    
+    /* Entity tags with dark theme */
     .entity-tag {
         display: inline-block;
-        padding: 0.25rem 0.75rem;
+        padding: 0.35rem 0.85rem;
         margin: 0.25rem;
-        border-radius: 12px;
+        border-radius: 16px;
         font-size: 0.85rem;
         font-weight: 600;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     }
-    .entity-policy { background-color: #e3f2fd; color: #1976d2; }
-    .entity-procedure { background-color: #f3e5f5; color: #7b1fa2; }
-    .entity-organization { background-color: #e8f5e9; color: #388e3c; }
-    .entity-condition { background-color: #fff3e0; color: #f57c00; }
-    .entity-demographic { background-color: #fce4ec; color: #c2185b; }
+    
+    .entity-policy { 
+        background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+        color: #FFFFFF;
+    }
+    .entity-procedure { 
+        background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
+        color: #FFFFFF;
+    }
+    .entity-organization { 
+        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+        color: #FFFFFF;
+    }
+    .entity-condition { 
+        background: linear-gradient(135deg, #ea580c 0%, #fb923c 100%);
+        color: #FFFFFF;
+    }
+    .entity-demographic { 
+        background: linear-gradient(135deg, #db2777 0%, #f472b6 100%);
+        color: #FFFFFF;
+    }
+    
     .relation-arrow {
-        color: #1f77b4;
+        color: #22C55E;
         font-weight: bold;
         margin: 0 0.5rem;
     }
     
-    /* Fix Streamlit default input styling */
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] {
+        background-color: #0E0E0E;
+        border-right: 1px solid rgba(34, 197, 94, 0.2);
+    }
+    
+    section[data-testid="stSidebar"] > div {
+        background-color: #0E0E0E;
+    }
+    
+    /* Text colors */
+    .stMarkdown, p, span, div {
+        color: #E0E0E0 !important;
+    }
+    
+    h1, h2, h3, h4, h5, h6 {
+        color: #FFFFFF !important;
+    }
+    
+    /* Input fields */
     .stTextInput > div > div > input {
-        background-color: white;
-        color: #333;
+        background-color: #1F1F1F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #2A2A2A !important;
+        border-radius: 8px !important;
     }
     
-    /* Fix selectbox styling */
-    .stSelectbox > div > div > select,
-    .stSelectbox > div > div > div {
-        background-color: white;
-        color: #333;
+    .stTextInput > div > div > input:focus {
+        border-color: #22C55E !important;
+        box-shadow: 0 0 0 1px #22C55E !important;
     }
     
-    /* Fix button styling */
+    /* Selectbox styling */
+    .stSelectbox > div > div {
+        background-color: #1F1F1F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #2A2A2A !important;
+        border-radius: 8px !important;
+    }
+    
+    /* Button styling - Neon Green */
     .stButton > button {
-        color: #333;
+        background: linear-gradient(135deg, #22C55E 0%, #16a34a 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3) !important;
+        transition: all 0.3s ease !important;
     }
     
-    /* Ensure all text inputs have proper contrast */
-    input, select, textarea {
-        background-color: white !important;
-        color: #333 !important;
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #16a34a 0%, #15803d 100%) !important;
+        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.5) !important;
+        transform: translateY(-2px) !important;
     }
     
-    /* Fix expander text */
+    /* Download button */
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, #22C55E 0%, #16a34a 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3) !important;
+    }
+    
+    .stDownloadButton > button:hover {
+        background: linear-gradient(135deg, #16a34a 0%, #15803d 100%) !important;
+        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.5) !important;
+    }
+    
+    /* Form submit button - Primary */
+    button[kind="primary"] {
+        background: linear-gradient(135deg, #22C55E 0%, #16a34a 100%) !important;
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.4) !important;
+    }
+    
+    /* Metrics */
+    div[data-testid="stMetricValue"] {
+        color: #22C55E !important;
+        font-weight: 700 !important;
+    }
+    
+    div[data-testid="stMetricLabel"] {
+        color: #A0A0A0 !important;
+    }
+    
+    /* Expander */
     .streamlit-expanderHeader {
-        color: #333;
+        background-color: #1F1F1F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #2A2A2A !important;
+        border-radius: 8px !important;
+    }
+    
+    .streamlit-expanderHeader:hover {
+        border-color: #22C55E !important;
+    }
+    
+    .streamlit-expanderContent {
+        background-color: #1A1A1A !important;
+        border: 1px solid #2A2A2A !important;
+        color: #E0E0E0 !important;
+    }
+    
+    /* Info boxes */
+    .stInfo {
+        background-color: #1F1F1F !important;
+        border-left: 4px solid #22C55E !important;
+        color: #E0E0E0 !important;
+    }
+    
+    .stWarning {
+        background-color: #2A1F1A !important;
+        border-left: 4px solid #f59e0b !important;
+        color: #fbbf24 !important;
+    }
+    
+    .stError {
+        background-color: #2A1A1A !important;
+        border-left: 4px solid #ef4444 !important;
+        color: #fca5a5 !important;
+    }
+    
+    /* Spinner */
+    .stSpinner > div {
+        border-top-color: #22C55E !important;
+    }
+    
+    /* Radio buttons */
+    .stRadio > label {
+        color: #E0E0E0 !important;
+    }
+    
+    /* Divider */
+    hr {
+        border-color: #2A2A2A !important;
+    }
+    
+    /* Caption text */
+    .stCaption {
+        color: #A0A0A0 !important;
+    }
+    
+    /* Links */
+    a {
+        color: #22C55E !important;
+        text-decoration: none !important;
+    }
+    
+    a:hover {
+        color: #16a34a !important;
+        text-decoration: underline !important;
+    }
+    
+    /* Code blocks */
+    code {
+        background-color: #1F1F1F !important;
+        color: #22C55E !important;
+        padding: 0.2rem 0.4rem !important;
+        border-radius: 4px !important;
+    }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #1A1A1A;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: #2A2A2A;
+        border-radius: 5px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+        background: #22C55E;
     }
 </style>
 """, unsafe_allow_html=True)

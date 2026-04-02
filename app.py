@@ -216,42 +216,48 @@ st.markdown("""
         border-radius: 8px !important;
     }
     
-    /* Button styling - Neon Green */
+    /* Button styling - Gray with White Text */
     .stButton > button {
-        background: linear-gradient(135deg, #22C55E 0%, #16a34a 100%) !important;
+        background: linear-gradient(135deg, #4B5563 0%, #374151 100%) !important;
         color: #FFFFFF !important;
         border: none !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
         transition: all 0.3s ease !important;
     }
     
     .stButton > button:hover {
-        background: linear-gradient(135deg, #16a34a 0%, #15803d 100%) !important;
-        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.5) !important;
+        background: linear-gradient(135deg, #374151 0%, #1F2937 100%) !important;
+        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3) !important;
         transform: translateY(-2px) !important;
     }
     
     /* Download button */
     .stDownloadButton > button {
-        background: linear-gradient(135deg, #22C55E 0%, #16a34a 100%) !important;
+        background: linear-gradient(135deg, #4B5563 0%, #374151 100%) !important;
         color: #FFFFFF !important;
         border: none !important;
         border-radius: 8px !important;
         font-weight: 600 !important;
-        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
     }
     
     .stDownloadButton > button:hover {
-        background: linear-gradient(135deg, #16a34a 0%, #15803d 100%) !important;
-        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.5) !important;
+        background: linear-gradient(135deg, #374151 0%, #1F2937 100%) !important;
+        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3) !important;
     }
     
     /* Form submit button - Primary */
     button[kind="primary"] {
-        background: linear-gradient(135deg, #22C55E 0%, #16a34a 100%) !important;
-        box-shadow: 0 0 20px rgba(34, 197, 94, 0.4) !important;
+        background: linear-gradient(135deg, #4B5563 0%, #374151 100%) !important;
+        color: #FFFFFF !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+    }
+    
+    button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #374151 0%, #1F2937 100%) !important;
+        box-shadow: 0 6px 20px rgba(34, 197, 94, 0.3) !important;
     }
     
     /* Metrics */
@@ -888,9 +894,10 @@ def main():
     
     # Check if reloading from history
     default_query = ""
-    if 'reload_query' in st.session_state:
+    if 'reload_query' in st.session_state and st.session_state.reload_query:
         default_query = st.session_state.reload_query
-        del st.session_state.reload_query
+        # Clear it after using (but only after form submission)
+        # Don't delete here - it breaks form submission!
     
     # Use a form so Enter key triggers search
     with st.form(key="search_form", clear_on_submit=False):
@@ -914,6 +921,10 @@ def main():
         st.rerun()
     
     if search_button and query:
+        # Clear reload_query now that we're searching
+        if 'reload_query' in st.session_state:
+            st.session_state.reload_query = ""
+        
         # Add to search history
         if query not in st.session_state.search_history:
             st.session_state.search_history.append(query)

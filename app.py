@@ -81,7 +81,7 @@ def check_rate_limit():
 
 # Page configuration
 st.set_page_config(
-    page_title="Medicare Policy Assistant",
+    page_title="Murali's Medicare Policy Assistant | GraphRAG Demo",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -107,6 +107,7 @@ st.markdown("""
         padding: 1rem;
         margin: 0.5rem 0;
         border-radius: 4px;
+        color: #333;
     }
     .entity-tag {
         display: inline-block;
@@ -125,6 +126,35 @@ st.markdown("""
         color: #1f77b4;
         font-weight: bold;
         margin: 0 0.5rem;
+    }
+    
+    /* Fix Streamlit default input styling */
+    .stTextInput > div > div > input {
+        background-color: white;
+        color: #333;
+    }
+    
+    /* Fix selectbox styling */
+    .stSelectbox > div > div > select,
+    .stSelectbox > div > div > div {
+        background-color: white;
+        color: #333;
+    }
+    
+    /* Fix button styling */
+    .stButton > button {
+        color: #333;
+    }
+    
+    /* Ensure all text inputs have proper contrast */
+    input, select, textarea {
+        background-color: white !important;
+        color: #333 !important;
+    }
+    
+    /* Fix expander text */
+    .streamlit-expanderHeader {
+        color: #333;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -522,8 +552,15 @@ def create_export_text(query: str, answer: str, sources: List[Dict], mode: str) 
     export_lines.extend([
         "",
         "="*70,
-        "Data Source: CMS Medicare Coverage Database",
-        "Model: Llama 3.3 70B (Databricks) | GraphRAG Knowledge Base",
+        "TECHNICAL DETAILS",
+        "="*70,
+        "",
+        "Application: Murali's Medicare Policy Assistant (GraphRAG Demo)",
+        "Data Source: CMS Medicare Coverage Database (56 documents)",
+        "Knowledge Graph: 241 entities, 311 relationships (built with Microsoft GraphRAG + GPT-4)",
+        "Runtime LLM: Llama 3.3 70B Instruct (Databricks Foundation Models)",
+        "Built by: Murali Menon",
+        "",
         "="*70
     ])
     
@@ -531,8 +568,56 @@ def create_export_text(query: str, answer: str, sources: List[Dict], mode: str) 
 
 def main():
     # Header
-    st.markdown('<div class="main-header">🏥 Medicare Policy Research Assistant</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🏥 Murali's Medicare Policy Assistant</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">GraphRAG-powered search across CMS Medicare Coverage Database</div>', unsafe_allow_html=True)
+    
+    # Demo disclaimer and technical info
+    with st.expander("ℹ️ About This Project", expanded=False):
+        st.markdown("""
+        ### 🎓 Educational Demo Project
+        
+        This application demonstrates the power of **GraphRAG (Graph Retrieval-Augmented Generation)** 
+        for intelligent document search and question answering.
+        
+        ### 🔬 Technical Stack
+        
+        **Knowledge Graph Generation:**
+        - Framework: Microsoft GraphRAG
+        - Entity Extraction: GPT-4 (via Azure OpenAI)
+        - Documents: 56 CMS Medicare policy documents
+        - Output: 241 entities, 311 relationships, 318 text chunks
+        
+        **Runtime Query Processing:**
+        - LLM: Llama 3.3 70B Instruct (Databricks Foundation Models)
+        - Serving: Databricks Model Serving Endpoints
+        - Search Modes: Direct text search + Graph-based relationship analysis
+        
+        **Data Source:**
+        - CMS Medicare Coverage Database
+        - Focus: National Coverage Determinations (NCDs), preventive services, screening procedures
+        
+        ### 🎯 Purpose
+        
+        This demo showcases how GraphRAG can:
+        - Extract structured knowledge from unstructured policy documents
+        - Enable relationship-based queries (not just keyword search)
+        - Provide transparent, source-attributed answers
+        - Scale to large document collections
+        
+        ### ⚠️ Disclaimer
+        
+        This is a **demonstration project** for educational and portfolio purposes. 
+        For official Medicare policy guidance, please consult [cms.gov](https://www.cms.gov).
+        
+        ### 👤 Built By
+        
+        **Murali Menon**  
+        [GitHub](https://github.com/muralimenon444) | [LinkedIn](https://linkedin.com/in/murali-menon)
+        
+        ---
+        
+        *Built with Streamlit | Deployed on Streamlit Cloud | Knowledge Base stored in Databricks Unity Catalog*
+        """)
     
     # Initialize session state
     if 'search_history' not in st.session_state:
@@ -580,16 +665,23 @@ def main():
             
             entities_of_type = kg_data["entities"][kg_data["entities"]["type"] == selected_type]
             st.caption(f"{len(entities_of_type)} {selected_type} entities")
+            st.caption("💡 Click any entity to search for it")
             
-            # Show sample entities
+            # Show sample entities as clickable buttons
             sample_entities = entities_of_type["text"].head(10).tolist()
-            for entity in sample_entities:
-                st.text(f"• {entity}")
+            for i, entity in enumerate(sample_entities):
+                # Create a button for each entity
+                if st.button(f"🔍 {entity}", key=f"entity_sample_{i}"):
+                    # Auto-fill search with a question about this entity
+                    st.session_state.reload_query = f"What is {entity}?"
+                    st.rerun()
             
             if len(entities_of_type) > 10:
                 with st.expander(f"Show all {len(entities_of_type)} entities"):
-                    for entity in entities_of_type["text"].tolist():
-                        st.text(f"• {entity}")
+                    for i, entity in enumerate(entities_of_type["text"].tolist()):
+                        if st.button(f"🔍 {entity}", key=f"entity_all_{i}"):
+                            st.session_state.reload_query = f"What is {entity}?"
+                            st.rerun()
         
         st.divider()
         
@@ -629,20 +721,25 @@ def main():
         default_query = st.session_state.reload_query
         del st.session_state.reload_query
     
-    query = st.text_input(
-        "Enter your question:",
-        value=default_query,
-        placeholder="e.g., What are the requirements for lung cancer screening?",
-        label_visibility="collapsed"
-    )
+    # Use a form so Enter key triggers search
+    with st.form(key="search_form", clear_on_submit=False):
+        query = st.text_input(
+            "Enter your question:",
+            value=default_query,
+            placeholder="e.g., What are the requirements for lung cancer screening? (Press Enter to search)",
+            label_visibility="collapsed"
+        )
+        
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            search_button = st.form_submit_button("🔍 Search", type="primary", use_container_width=True)
+        with col2:
+            # Note: Clear button must be outside form to work properly
+            pass
     
-    col1, col2 = st.columns([1, 5])
-    with col1:
-        search_button = st.button("🔍 Search", type="primary", use_container_width=True)
-    with col2:
-        clear_button = st.button("🗑️ Clear", use_container_width=True)
-    
-    if clear_button:
+    # Clear button outside form
+    if st.button("🗑️ Clear", use_container_width=True):
+        st.session_state.reload_query = ""
         st.rerun()
     
     if search_button and query:

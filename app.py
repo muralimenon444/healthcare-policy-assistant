@@ -470,7 +470,9 @@ def render_relationship(rel: Dict):
 
 def render_text_chunk(chunk: Dict, index: int, query: str):
     """Render a text chunk with highlighting."""
-    st.markdown(f"**📄 Source {index + 1}** (Score: {chunk.get('score', 'N/A'):.2f})")
+    score = chunk.get('score', 0)
+    score_str = f"{score:.2f}" if isinstance(score, (int, float)) else "N/A"
+    st.markdown(f"**📄 Source {index + 1}** (Score: {score_str})")
     
     # Highlight query terms
     query_words = query.lower().split()
@@ -485,10 +487,60 @@ def render_text_chunk(chunk: Dict, index: int, query: str):
 # MAIN APPLICATION
 # ============================================================================
 
+
+def create_export_text(query: str, answer: str, sources: List[Dict], mode: str) -> str:
+    """Create formatted text for export."""
+    export_lines = [
+        "="*70,
+        "MEDICARE POLICY RESEARCH ASSISTANT - QUERY RESULTS",
+        "="*70,
+        "",
+        f"Query: {query}",
+        f"Search Mode: {mode}",
+        f"Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "="*70,
+        "ANSWER",
+        "="*70,
+        "",
+        answer,
+        "",
+        "="*70,
+        "SOURCES",
+        "="*70,
+        ""
+    ]
+    
+    for i, source in enumerate(sources, 1):
+        export_lines.append(f"\n[Source {i}]")
+        if 'score' in source:
+            export_lines.append(f"Relevance Score: {source.get('score', 'N/A')}")
+        export_lines.append(f"Document ID: {source.get('document_id', 'unknown')}")
+        export_lines.append(f"Text: {source.get('text', '')}\n")
+        export_lines.append("-"*70)
+    
+    export_lines.extend([
+        "",
+        "="*70,
+        "Data Source: CMS Medicare Coverage Database",
+        "Model: Llama 3.3 70B (Databricks) | GraphRAG Knowledge Base",
+        "="*70
+    ])
+    
+    return "\n".join(export_lines)
+
 def main():
     # Header
     st.markdown('<div class="main-header">🏥 Medicare Policy Research Assistant</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">GraphRAG-powered search across CMS Medicare Coverage Database</div>', unsafe_allow_html=True)
+    
+    # Initialize session state
+    if 'search_history' not in st.session_state:
+        st.session_state.search_history = []
+    if 'last_result' not in st.session_state:
+        st.session_state.last_result = None
+    if 'bookmarks' not in st.session_state:
+        st.session_state.bookmarks = []
     
     # Initialize
     client = initialize_openai_client()
@@ -517,25 +569,69 @@ def main():
         
         st.divider()
         
+        # Entity Explorer
+        with st.expander("🔍 Entity Explorer"):
+            entity_types = kg_data["entities"]["type"].unique().tolist()
+            selected_type = st.selectbox(
+                "Browse by Type",
+                entity_types,
+                help="Explore entities in the knowledge graph"
+            )
+            
+            entities_of_type = kg_data["entities"][kg_data["entities"]["type"] == selected_type]
+            st.caption(f"{len(entities_of_type)} {selected_type} entities")
+            
+            # Show sample entities
+            sample_entities = entities_of_type["text"].head(10).tolist()
+            for entity in sample_entities:
+                st.text(f"• {entity}")
+            
+            if len(entities_of_type) > 10:
+                with st.expander(f"Show all {len(entities_of_type)} entities"):
+                    for entity in entities_of_type["text"].tolist():
+                        st.text(f"• {entity}")
+        
+        st.divider()
+        
+        # Search History
+        if st.session_state.search_history:
+            with st.expander("🕐 Search History"):
+                st.caption(f"{len(st.session_state.search_history)} recent queries")
+                for i, past_query in enumerate(reversed(st.session_state.search_history[-10:])):
+                    if st.button(f"📌 {past_query[:50]}...", key=f"history_{i}"):
+                        st.session_state.reload_query = past_query
+                        st.rerun()
+            
+            st.divider()
+        
         st.subheader("💡 Example Questions")
         if search_mode == "Standard Search":
             st.markdown("""
-            - What are lung cancer screening NCD requirements?
+            - What are the lung cancer screening requirements?
             - List HCPCS codes for preventive services
-            - What contractors administer NCDs in California?
+            - Describe Medicare prescription drug coverage
+            - What are the coverage requirements for LDCT screening?
             """)
         else:
             st.markdown("""
-            - How are NCDs and contractors connected?
+            - How are Medicare preventive services and CMS connected?
             - What policies affect Medicare beneficiaries?
-            - How are preventive services and screening related?
+            - How are screening procedures and USPSTF related?
+            - What is the National Coverage Determination for lung cancer screening?
             """)
     
     # Main chat interface
     st.header("💬 Ask a Question")
     
+    # Check if reloading from history
+    default_query = ""
+    if 'reload_query' in st.session_state:
+        default_query = st.session_state.reload_query
+        del st.session_state.reload_query
+    
     query = st.text_input(
         "Enter your question:",
+        value=default_query,
         placeholder="e.g., What are the requirements for lung cancer screening?",
         label_visibility="collapsed"
     )
@@ -550,6 +646,13 @@ def main():
         st.rerun()
     
     if search_button and query:
+        # Add to search history
+        if query not in st.session_state.search_history:
+            st.session_state.search_history.append(query)
+            # Keep only last 50 queries
+            if len(st.session_state.search_history) > 50:
+                st.session_state.search_history = st.session_state.search_history[-50:]
+        
         # Rate limiting check
         check_rate_limit()
         
@@ -566,9 +669,29 @@ def main():
                     # Generate answer
                     answer = generate_answer_direct(query, chunks, client)
                     
+                    # Save to session state
+                    st.session_state.last_result = {
+                        'query': query,
+                        'answer': answer,
+                        'sources': chunks,
+                        'mode': 'Standard Search'
+                    }
+                    
                     # Display answer
                     st.markdown("### 💡 Answer")
                     st.info(answer)
+                    
+                    # Export button
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        export_text = create_export_text(query, answer, chunks, "Standard Search")
+                        st.download_button(
+                            label="📥 Export",
+                            data=export_text,
+                            file_name=f"medicare_policy_{query[:30].replace(' ', '_')}.txt",
+                            mime="text/plain",
+                            help="Download this answer and sources as a text file"
+                        )
                     
                     # Display sources
                     st.markdown("### 📚 Source Text Chunks")
@@ -605,9 +728,29 @@ def main():
                         # Generate answer
                         answer = generate_answer_graph(query, entities, relationships, chunks, client)
                         
+                        # Save to session state
+                        st.session_state.last_result = {
+                            'query': query,
+                            'answer': answer,
+                            'sources': chunks,
+                            'mode': 'Relationship Analysis'
+                        }
+                        
                         # Display answer
                         st.markdown("### 💡 Answer")
                         st.info(answer)
+                        
+                        # Export button
+                        col1, col2 = st.columns([1, 4])
+                        with col1:
+                            export_text = create_export_text(query, answer, chunks, "Relationship Analysis")
+                            st.download_button(
+                                label="📥 Export",
+                                data=export_text,
+                                file_name=f"medicare_policy_{query[:30].replace(' ', '_')}.txt",
+                                mime="text/plain",
+                                help="Download this answer and sources as a text file"
+                            )
                         
                         # Display relationships
                         st.markdown(f"### 🔗 Knowledge Graph Relationships ({len(relationships)} found)")

@@ -90,16 +90,23 @@ st.set_page_config(
 # Custom CSS for better UI
 st.markdown("""
 <style>
+    /* Import clean system fonts */
+    * {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    
     .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
+        font-size: 2.2rem;
+        font-weight: 600;
         color: #1f77b4;
         margin-bottom: 0.5rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .sub-header {
-        font-size: 1.1rem;
-        color: #666;
+        font-size: 1rem;
+        color: #555;
         margin-bottom: 2rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .source-box {
         background-color: #f0f2f6;
@@ -611,8 +618,7 @@ def main():
         
         ### 👤 Built By
         
-        **Murali Menon**  
-        [GitHub](https://github.com/muralimenon444) | [LinkedIn](https://linkedin.com/in/murali-menon)
+        **Murali Menon**
         
         ---
         
@@ -653,37 +659,7 @@ def main():
         st.metric("Text Chunks", len(kg_data["text_units"]))
         
         st.divider()
-        
-        # Entity Explorer
-        with st.expander("🔍 Entity Explorer"):
-            entity_types = kg_data["entities"]["type"].unique().tolist()
-            selected_type = st.selectbox(
-                "Browse by Type",
-                entity_types,
-                help="Explore entities in the knowledge graph"
-            )
-            
-            entities_of_type = kg_data["entities"][kg_data["entities"]["type"] == selected_type]
-            st.caption(f"{len(entities_of_type)} {selected_type} entities")
-            st.caption("💡 Click any entity to search for it")
-            
-            # Show sample entities as clickable buttons
-            sample_entities = entities_of_type["text"].head(10).tolist()
-            for i, entity in enumerate(sample_entities):
-                # Create a button for each entity
-                if st.button(f"🔍 {entity}", key=f"entity_sample_{i}"):
-                    # Auto-fill search with a question about this entity
-                    st.session_state.reload_query = f"What is {entity}?"
-                    st.rerun()
-            
-            if len(entities_of_type) > 10:
-                with st.expander(f"Show all {len(entities_of_type)} entities"):
-                    for i, entity in enumerate(entities_of_type["text"].tolist()):
-                        if st.button(f"🔍 {entity}", key=f"entity_all_{i}"):
-                            st.session_state.reload_query = f"What is {entity}?"
-                            st.rerun()
-        
-        st.divider()
+
         
         # Search History
         if st.session_state.search_history:

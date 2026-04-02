@@ -568,7 +568,7 @@ def create_export_text(query: str, answer: str, sources: List[Dict], mode: str) 
 
 def main():
     # Header
-    st.markdown('<div class="main-header">🏥 Murali's Medicare Policy Assistant</div>', unsafe_allow_html=True)
+    st.markdown("<div class='main-header'>🏥 Murali's Medicare Policy Assistant</div>", unsafe_allow_html=True)
     st.markdown('<div class="sub-header">GraphRAG-powered search across CMS Medicare Coverage Database</div>', unsafe_allow_html=True)
     
     # Demo disclaimer and technical info

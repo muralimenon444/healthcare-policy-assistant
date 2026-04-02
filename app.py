@@ -908,17 +908,8 @@ def main():
             label_visibility="collapsed"
         )
         
-        col1, col2 = st.columns([1, 5])
-        with col1:
-            search_button = st.form_submit_button("🔍 Search", type="primary", use_container_width=True)
-        with col2:
-            # Note: Clear button must be outside form to work properly
-            pass
-    
-    # Clear button outside form
-    if st.button("🗑️ Clear", use_container_width=True):
-        st.session_state.reload_query = ""
-        st.rerun()
+        # Search button (full width, no Clear button needed)
+        search_button = st.form_submit_button("🔍 Search", type="primary", use_container_width=True)
     
     if search_button and query:
         # Clear reload_query now that we're searching

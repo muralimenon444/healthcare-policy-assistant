@@ -526,9 +526,8 @@ with st.sidebar:
 st.markdown('<h1 class="main-header">🏥 Murali\'s Medicare Policy Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">GraphRAG-Powered Analysis of CMS Medicare Coverage Database</p>', unsafe_allow_html=True)
 
-# Quick Start - Suggested Questions (only show when no results)
-if st.session_state.current_results is None:
-    with st.expander("🚀 Quick Start - Suggested Questions", expanded=True):
+# Quick Start - Suggested Questions (always visible, collapse after search)
+with st.expander("🚀 Quick Start - Suggested Questions", expanded=(st.session_state.current_results is None)):
         tab1, tab2, tab3 = st.tabs(["📋 Simple Retrieval", "🔗 Entity Connections", "🔀 Well-Connected Topics"])
         
         with tab1:

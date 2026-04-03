@@ -833,6 +833,71 @@ def render_text_chunk(chunk: Dict, index: int, query: str):
 # ============================================================================
 
 
+
+def generate_related_questions(query: str, entities: List[Tuple], kg_data: Dict, client: OpenAI) -> List[str]:
+    """
+    Generate related follow-up questions based on the current query and detected entities.
+    Returns a list of 3-5 suggested questions.
+    """
+    try:
+        # Build context from entities
+        entity_names = [e[0] for e in entities[:5]] if entities else []
+        entity_types = [e[1] for e in entities[:5]] if entities else []
+        
+        # Get a few relationships for context
+        relationships = []
+        if entity_names and kg_data:
+            relationships = find_relationships(entity_names, kg_data)[:5]
+        
+        # Build prompt for generating related questions
+        context_parts = []
+        if entity_names:
+            context_parts.append(f"Detected entities: {', '.join(entity_names)}")
+        if relationships:
+            rel_summary = [f"{r['source']} → {r['relation']} → {r['target']}" for r in relationships[:3]]
+            context_parts.append(f"Related connections: {'; '.join(rel_summary)}")
+        
+        context = "\n".join(context_parts) if context_parts else "Medicare policy domain"
+        
+        prompt = f"""Given this Medicare policy question: "{query}"
+        
+Context from knowledge graph:
+{context}
+
+Generate exactly 3 related follow-up questions that would help the user explore:
+1. A deeper dive into the same topic (more specific details)
+2. A related policy or procedure connection
+3. A practical application or comparison
+
+Format: Return ONLY 3 questions, one per line, no numbering or bullets.
+Questions should be natural, specific, and directly related to the original query."""
+
+        response = client.chat.completions.create(
+            model=st.secrets.get("MODEL_NAME", "databricks-meta-llama-3-3-70b-instruct"),
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.7
+        )
+        
+        # Parse response into list of questions
+        questions_text = response.choices[0].message.content.strip()
+        questions = [q.strip() for q in questions_text.split('\n') if q.strip() and '?' in q]
+        
+        # Return up to 3 questions
+        return questions[:3]
+        
+    except Exception as e:
+        # Fallback to simple entity-based questions if LLM fails
+        if entities:
+            entity_name = entities[0][0]
+            return [
+                f"What are the coverage requirements for {entity_name}?",
+                f"How does {entity_name} interact with other Medicare policies?",
+                f"What are the recent changes to {entity_name} policies?"
+            ]
+        return []
+
+
 def create_export_text(query: str, answer: str, sources: List[Dict], mode: str) -> str:
     """Create formatted text for export."""
     export_lines = [
@@ -996,7 +1061,99 @@ def main():
             - What is the National Coverage Determination for lung cancer screening?
             """)
     
-    # Main chat interface
+    # ============================================================================
+    # SUGGESTED QUESTIONS - Quick Start
+    # ============================================================================
+    
+    # Only show suggestions if no query has been made yet
+    if not st.session_state.search_history:
+        st.markdown("### 🚀 Quick Start - Suggested Questions")
+        st.caption("Click any question below to get started")
+        
+        # Define suggested questions by analysis level
+        suggestions = {
+            "Simple Retrieval": [
+                {
+                    "icon": "📋",
+                    "question": "What are the eligibility requirements for lung cancer screening?",
+                    "description": "Direct policy lookup"
+                },
+                {
+                    "icon": "💊",
+                    "question": "What HCPCS codes are covered for preventive services?",
+                    "description": "Code identification"
+                },
+                {
+                    "icon": "🏥",
+                    "question": "What are the NCD requirements for cardiovascular screening?",
+                    "description": "Coverage criteria"
+                }
+            ],
+            "Relationship Analysis": [
+                {
+                    "icon": "🔗",
+                    "question": "How do the 2026 Part D redesign rules impact out-of-pocket costs for beneficiaries?",
+                    "description": "Policy impact analysis"
+                },
+                {
+                    "icon": "🧬",
+                    "question": "How are LDCT screening and lung cancer prevention policies connected?",
+                    "description": "Entity relationships"
+                },
+                {
+                    "icon": "📊",
+                    "question": "What is the relationship between NCDs, LCDs, and local contractors?",
+                    "description": "Coverage hierarchy"
+                }
+            ],
+            "Cross-Manual Logic": [
+                {
+                    "icon": "🔀",
+                    "question": "Based on the Benefit Policy Manual, when does a telehealth service shift from Part A to Part B coverage?",
+                    "description": "Multi-source reasoning"
+                },
+                {
+                    "icon": "🎯",
+                    "question": "How do Claims Processing Manual rules interact with National Coverage Determinations for new technologies?",
+                    "description": "Policy integration"
+                },
+                {
+                    "icon": "⚖️",
+                    "question": "What are the billing differences between Medicare Advantage and Original Medicare for preventive services?",
+                    "description": "Comparative analysis"
+                }
+            ]
+        }
+        
+        # Display suggestions in tabs
+        tabs = st.tabs(["📋 Simple Retrieval", "🔗 Relationship Analysis", "🔀 Cross-Manual Logic"])
+        
+        for tab_idx, (level_name, questions) in enumerate(suggestions.items()):
+            with tabs[tab_idx]:
+                st.caption(f"**{level_name}:** {'Direct facts from policy documents' if level_name == 'Simple Retrieval' else 'Entity connections and impact' if level_name == 'Relationship Analysis' else 'Multi-source policy integration'}")
+                
+                # Create 3 columns for the tiles
+                cols = st.columns(3)
+                
+                for idx, suggestion in enumerate(questions):
+                    with cols[idx]:
+                        # Create a clean card-like button
+                        if st.button(
+                            f"{suggestion['icon']} **{suggestion['question'][:50]}{'...' if len(suggestion['question']) > 50 else ''}**",
+                            key=f"suggest_{level_name}_{idx}",
+                            use_container_width=True,
+                            help=suggestion['description']
+                        ):
+                            # Set the query in session state and trigger reload
+                            st.session_state.reload_query = suggestion['question']
+                            st.rerun()
+                        
+                        # Add description below button
+                        st.caption(f"_{suggestion['description']}_")
+        
+        st.markdown("---")
+    
+        # Main chat interface
     st.header("💬 Ask a Question")
     
     # Check if reloading from history
@@ -1070,6 +1227,28 @@ def main():
                             help="Download this answer and sources as a text file"
                         )
                     
+                    
+                    # Display related questions
+                    st.markdown("---")
+                    st.markdown("### 💡 Related Questions You Might Ask")
+                    
+                    with st.spinner("Generating related questions..."):
+                        # Generate related questions based on query
+                        related = generate_related_questions(query, [], kg_data, client)
+                        
+                        if related:
+                            cols = st.columns(len(related))
+                            for idx, rel_q in enumerate(related):
+                                with cols[idx]:
+                                    if st.button(
+                                        f"🔍 {rel_q[:60]}{'...' if len(rel_q) > 60 else ''}",
+                                        key=f"related_std_{idx}",
+                                        use_container_width=True,
+                                        help=rel_q
+                                    ):
+                                        st.session_state.reload_query = rel_q
+                                        st.rerun()
+                    
                     # Display sources
                     st.markdown("### 📚 Source Text Chunks")
                     st.caption(f"Showing top {len(chunks)} relevant excerpts")
@@ -1128,6 +1307,28 @@ def main():
                                 mime="text/plain",
                                 help="Download this answer and sources as a text file"
                             )
+                        
+                        
+                        # Display related questions
+                        st.markdown("---")
+                        st.markdown("### 💡 Related Questions You Might Ask")
+                        
+                        with st.spinner("Generating related questions..."):
+                            # Generate related questions based on query and entities
+                            related = generate_related_questions(query, entities, kg_data, client)
+                            
+                            if related:
+                                cols = st.columns(len(related))
+                                for idx, rel_q in enumerate(related):
+                                    with cols[idx]:
+                                        if st.button(
+                                            f"🔍 {rel_q[:60]}{'...' if len(rel_q) > 60 else ''}",
+                                            key=f"related_graph_{idx}",
+                                            use_container_width=True,
+                                            help=rel_q
+                                        ):
+                                            st.session_state.reload_query = rel_q
+                                            st.rerun()
                         
                         # Display relationships
                         st.markdown(f"### 🔗 Knowledge Graph Relationships ({len(relationships)} found)")

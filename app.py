@@ -1125,44 +1125,7 @@ def main():
                 }
             ]
         }
-            ],
-            "Relationship Analysis": [
-                {
-                    "icon": "🔗",
-                    "question": "How do the 2026 Part D redesign rules impact out-of-pocket costs for beneficiaries?",
-                    "description": "Policy impact analysis"
-                },
-                {
-                    "icon": "🧬",
-                    "question": "How are LDCT screening and lung cancer prevention policies connected?",
-                    "description": "Entity relationships"
-                },
-                {
-                    "icon": "📊",
-                    "question": "What is the relationship between NCDs, LCDs, and local contractors?",
-                    "description": "Coverage hierarchy"
-                }
-            ],
-            "Cross-Manual Logic": [
-                {
-                    "icon": "🔀",
-                    "question": "Based on the Benefit Policy Manual, when does a telehealth service shift from Part A to Part B coverage?",
-                    "description": "Multi-source reasoning"
-                },
-                {
-                    "icon": "🎯",
-                    "question": "How do Claims Processing Manual rules interact with National Coverage Determinations for new technologies?",
-                    "description": "Policy integration"
-                },
-                {
-                    "icon": "⚖️",
-                    "question": "What are the billing differences between Medicare Advantage and Original Medicare for preventive services?",
-                    "description": "Comparative analysis"
-                }
-            ]
-        }
-        
-        # Display suggestions in tabs
+
         tabs = st.tabs(["📋 Simple Retrieval", "🔗 Relationship Analysis", "🔀 Cross-Manual Logic"])
         
         for tab_idx, (level_name, questions) in enumerate(suggestions.items()):

@@ -1028,85 +1028,86 @@ def main():
         st.caption("Click any question to search")
         
         # Define suggested questions by analysis level
-                suggestions = {
-        "Simple Retrieval": [
-        {
-        "icon": "📋",
-        "question": "What is Medicare Part D Stand-alone Prescription Drug Plan?",
-        "description": "Top policy entity"
-        },
-        {
-        "icon": "💊",
-        "question": "What is Low Dose Computed Tomography (LDCT)?",
-        "description": "Procedure details"
-        },
-        {
-        "icon": "🏥",
-        "question": "What are medicare-preventive-services?",
-        "description": "Preventive coverage"
+        suggestions = {
+            "Simple Retrieval": [
+                {
+                    "icon": "📋",
+                    "question": "What is Medicare Part D Stand-alone Prescription Drug Plan?",
+                    "description": "Top policy entity"
+                },
+                {
+                    "icon": "💊",
+                    "question": "What is Low Dose Computed Tomography (LDCT)?",
+                    "description": "Procedure details"
+                },
+                {
+                    "icon": "🏥",
+                    "question": "What are medicare-preventive-services?",
+                    "description": "Preventive coverage"
+                }
+            ],
+            "Entity Connections": [
+                {
+                    "icon": "🔗",
+                    "question": "How is Centers for Medicare & Medicaid Services (CMS) connected to Medicare Part D?",
+                    "description": "Organization relationships"
+                },
+                {
+                    "icon": "🧬",
+                    "question": "What is the relationship between Medicare Part B and preventive services?",
+                    "description": "Coverage connections"
+                },
+                {
+                    "icon": "📊",
+                    "question": "How do Part D plan sponsors relate to prescription drug coverage?",
+                    "description": "Sponsor relationships"
+                }
+            ],
+            "Well-Connected Topics": [
+                {
+                    "icon": "🔀",
+                    "question": "Tell me about Pelvic Screening Examination coverage",
+                    "description": "Screening procedures"
+                },
+                {
+                    "icon": "🎯",
+                    "question": "What is the Inflation Reduction Act Subsidy Amount (IRASA)?",
+                    "description": "Cost subsidy policy"
+                },
+                {
+                    "icon": "⚖️",
+                    "question": "What do Carriers do in Medicare?",
+                    "description": "Organization roles"
+                }
+            ]
         }
-        ],
-        "Entity Connections": [
-        {
-        "icon": "🔗",
-        "question": "How is Centers for Medicare & Medicaid Services (CMS) connected to Medicare Part D?",
-        "description": "Organization relationships"
-        },
-        {
-        "icon": "🧬",
-        "question": "What is the relationship between Medicare Part B and preventive services?",
-        "description": "Coverage connections"
-        },
-        {
-        "icon": "📊",
-        "question": "How do Part D plan sponsors relate to prescription drug coverage?",
-        "description": "Sponsor relationships"
-        }
-        ],
-        "Well-Connected Topics": [
-        {
-        "icon": "🔀",
-        "question": "Tell me about Pelvic Screening Examination coverage",
-        "description": "Screening procedures"
-        },
-        {
-        "icon": "🎯",
-        "question": "What is the Inflation Reduction Act Subsidy Amount (IRASA)?",
-        "description": "Cost subsidy policy"
-        },
-        {
-        "icon": "⚖️",
-        "question": "What do Carriers do in Medicare?",
-        "description": "Organization roles"
-        }
-        ]
-        }
+
 
         tabs = st.tabs(["📋 Simple Retrieval", "🔗 Entity Connections", "🔀 Well-Connected Topics"])
 
         for tab_idx, (level_name, questions) in enumerate(suggestions.items()):
-        with tabs[tab_idx]:
-        st.caption(f"**{level_name}:** {'Direct facts from policy documents' if level_name == 'Simple Retrieval' else 'How entities relate to each other' if level_name == 'Entity Connections' else 'Multi-entity policy questions'}")
+            with tabs[tab_idx]:
+                st.caption(f"**{level_name}:** {'Direct facts from policy documents' if level_name == 'Simple Retrieval' else 'How entities relate to each other' if level_name == 'Entity Connections' else 'Multi-entity policy questions'}")
 
-        # Create 3 columns for the tiles
-        cols = st.columns(3)
+                # Create 3 columns for the tiles
+                cols = st.columns(3)
 
-        for idx, suggestion in enumerate(questions):
-        with cols[idx]:
-        # Create a clean card-like button
-        if st.button(
-        f"{suggestion['icon']} **{suggestion['question'][:50]}{'...' if len(suggestion['question']) > 50 else ''}**",
-        key=f"suggest_{level_name}_{idx}",
-        use_container_width=True,
-        help=suggestion['description']
+                for idx, suggestion in enumerate(questions):
+                    with cols[idx]:
+                        # Create a clean card-like button
+                        if st.button(
+                            f"{suggestion['icon']} **{suggestion['question'][:50]}{'...' if len(suggestion['question']) > 50 else ''}**",
+                            key=f"suggest_{level_name}_{idx}",
+                            use_container_width=True,
+                            help=suggestion['description']
         ):
         # Set the query in session state and trigger reload
-        st.session_state.reload_query = suggestion['question']
-                                        st.session_state.auto_submit = True
-        st.rerun()
+                            st.session_state.reload_query = suggestion['question']
+                            st.session_state.auto_submit = True
+                            st.rerun()
 
         # Add description below button
-        st.caption(f"_{suggestion['description']}_")
+                st.caption(f"_{suggestion['description']}_")
 
 
 

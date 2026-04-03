@@ -403,9 +403,19 @@ def create_graph_visualization(entities: List[Dict], paths: List[Dict]) -> str:
         node_set.add(path["origin"])
         node_set.add(path["target"])
     
-    for node in node_set:
-        if not net.get_node(node):
-            net.add_node(node, label=node, color="#6B7280", size=20)
+    # Track added nodes to avoid duplicates
+    added_nodes = set()
+    
+    for entity in entities:
+        added_nodes.add(entity["name"])
+    
+    for path in paths:
+        if path["origin"] not in added_nodes:
+            net.add_node(path["origin"], label=path["origin"], color="#6B7280", size=20)
+            added_nodes.add(path["origin"])
+        if path["target"] not in added_nodes:
+            net.add_node(path["target"], label=path["target"], color="#6B7280", size=20)
+            added_nodes.add(path["target"])
     
     # Add edges
     for path in paths:
@@ -454,7 +464,8 @@ def simulate_progress(steps: List[str]):
 # ============================================================================
 
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/000000/medical-heart.png", width=80)
+    # Header emoji instead of external image
+    st.markdown("## 🏥")
     st.markdown("### 🏥 Medicare Policy Assistant")
     st.caption("GraphRAG-Powered Research Tool")
     

@@ -1076,19 +1076,55 @@ def main():
             "Simple Retrieval": [
                 {
                     "icon": "📋",
-                    "question": "What are the eligibility requirements for lung cancer screening?",
-                    "description": "Direct policy lookup"
+                    "question": "What is Medicare Part D Stand-alone Prescription Drug Plan?",
+                    "description": "Top policy entity"
                 },
                 {
                     "icon": "💊",
-                    "question": "What HCPCS codes are covered for preventive services?",
-                    "description": "Code identification"
+                    "question": "What is Low Dose Computed Tomography (LDCT)?",
+                    "description": "Procedure details"
                 },
                 {
                     "icon": "🏥",
-                    "question": "What are the NCD requirements for cardiovascular screening?",
-                    "description": "Coverage criteria"
+                    "question": "What are medicare-preventive-services?",
+                    "description": "Preventive coverage"
                 }
+            ],
+            "Entity Connections": [
+                {
+                    "icon": "🔗",
+                    "question": "How is Centers for Medicare & Medicaid Services (CMS) connected to Medicare Part D?",
+                    "description": "Organization relationships"
+                },
+                {
+                    "icon": "🧬",
+                    "question": "What is the relationship between Medicare Part B and preventive services?",
+                    "description": "Coverage connections"
+                },
+                {
+                    "icon": "📊",
+                    "question": "How do Part D plan sponsors relate to prescription drug coverage?",
+                    "description": "Sponsor relationships"
+                }
+            ],
+            "Well-Connected Topics": [
+                {
+                    "icon": "🔀",
+                    "question": "Tell me about Pelvic Screening Examination coverage",
+                    "description": "Screening procedures"
+                },
+                {
+                    "icon": "🎯",
+                    "question": "What is the Inflation Reduction Act Subsidy Amount (IRASA)?",
+                    "description": "Cost subsidy policy"
+                },
+                {
+                    "icon": "⚖️",
+                    "question": "What do Carriers do in Medicare?",
+                    "description": "Organization roles"
+                }
+            ]
+        }
             ],
             "Relationship Analysis": [
                 {
@@ -1157,12 +1193,16 @@ def main():
         # Main chat interface
     st.header("💬 Ask a Question")
     
-    # Check if reloading from history
+    # Check if reloading from history or suggested question
     default_query = ""
+    auto_submit_flag = False
+    
     if 'reload_query' in st.session_state and st.session_state.reload_query:
         default_query = st.session_state.reload_query
-        # Clear it after using (but only after form submission)
-        # Don't delete here - it breaks form submission!
+        
+    if 'auto_submit' in st.session_state and st.session_state.auto_submit:
+        auto_submit_flag = True
+        st.session_state.auto_submit = False  # Clear it
     
     # Use a form so Enter key triggers search
     with st.form(key="search_form", clear_on_submit=False):
@@ -1176,15 +1216,10 @@ def main():
         # Search button (full width, no Clear button needed)
         search_button = st.form_submit_button("🔍 Search", type="primary", use_container_width=True)
     
-    # Auto-submit if coming from suggested question
-    auto_submit = st.session_state.get('auto_submit', False)
-    
-    if (search_button or auto_submit) and query:
-        # Clear flags now that we're searching
+    if (search_button or auto_submit_flag) and query:
+        # Clear reload_query now that we're searching
         if 'reload_query' in st.session_state:
             st.session_state.reload_query = ""
-        if 'auto_submit' in st.session_state:
-            st.session_state.auto_submit = False
         
         # Add to search history
         if query not in st.session_state.search_history:

@@ -1041,6 +1041,7 @@ def main():
                 for i, past_query in enumerate(reversed(st.session_state.search_history[-10:])):
                     if st.button(f"📌 {past_query[:50]}...", key=f"history_{i}"):
                         st.session_state.reload_query = past_query
+                        st.session_state.auto_submit = True
                         st.rerun()
             
             st.divider()
@@ -1075,58 +1076,58 @@ def main():
             "Simple Retrieval": [
                 {
                     "icon": "📋",
-                    "question": "What are the coverage requirements for lung cancer screening?",
+                    "question": "What are the eligibility requirements for lung cancer screening?",
                     "description": "Direct policy lookup"
                 },
                 {
                     "icon": "💊",
-                    "question": "What is the Medicare Part D prescription drug plan?",
-                    "description": "Plan details"
+                    "question": "What HCPCS codes are covered for preventive services?",
+                    "description": "Code identification"
                 },
                 {
                     "icon": "🏥",
-                    "question": "What are Medicare beneficiaries eligible for?",
-                    "description": "Eligibility overview"
+                    "question": "What are the NCD requirements for cardiovascular screening?",
+                    "description": "Coverage criteria"
                 }
             ],
-            "Entity Connections": [
+            "Relationship Analysis": [
                 {
                     "icon": "🔗",
-                    "question": "How does Medicare Part D connect to prescription drug coverage?",
-                    "description": "Policy relationships"
+                    "question": "How do the 2026 Part D redesign rules impact out-of-pocket costs for beneficiaries?",
+                    "description": "Policy impact analysis"
                 },
                 {
                     "icon": "🧬",
-                    "question": "What is the relationship between LDCT screening and lung cancer?",
-                    "description": "Procedure connections"
+                    "question": "How are LDCT screening and lung cancer prevention policies connected?",
+                    "description": "Entity relationships"
                 },
                 {
                     "icon": "📊",
-                    "question": "How do National Coverage Determinations affect local contractors?",
+                    "question": "What is the relationship between NCDs, LCDs, and local contractors?",
                     "description": "Coverage hierarchy"
                 }
             ],
-            "Complex Queries": [
+            "Cross-Manual Logic": [
                 {
                     "icon": "🔀",
-                    "question": "What policies affect Medicare Advantage beneficiaries?",
-                    "description": "Multi-entity analysis"
+                    "question": "Based on the Benefit Policy Manual, when does a telehealth service shift from Part A to Part B coverage?",
+                    "description": "Multi-source reasoning"
                 },
                 {
                     "icon": "🎯",
-                    "question": "What are the out-of-pocket costs for Medicare Part D?",
-                    "description": "Cost analysis"
+                    "question": "How do Claims Processing Manual rules interact with National Coverage Determinations for new technologies?",
+                    "description": "Policy integration"
                 },
                 {
                     "icon": "⚖️",
-                    "question": "How do discount programs work with Medicare Part D?",
-                    "description": "Program integration"
+                    "question": "What are the billing differences between Medicare Advantage and Original Medicare for preventive services?",
+                    "description": "Comparative analysis"
                 }
             ]
         }
         
         # Display suggestions in tabs
-        tabs = st.tabs(["📋 Simple Retrieval", "🔗 Entity Connections", "🔀 Complex Queries"])
+        tabs = st.tabs(["📋 Simple Retrieval", "🔗 Relationship Analysis", "🔀 Cross-Manual Logic"])
         
         for tab_idx, (level_name, questions) in enumerate(suggestions.items()):
             with tabs[tab_idx]:
@@ -1175,10 +1176,15 @@ def main():
         # Search button (full width, no Clear button needed)
         search_button = st.form_submit_button("🔍 Search", type="primary", use_container_width=True)
     
-    if search_button and query:
-        # Clear reload_query now that we're searching
+    # Auto-submit if coming from suggested question
+    auto_submit = st.session_state.get('auto_submit', False)
+    
+    if (search_button or auto_submit) and query:
+        # Clear flags now that we're searching
         if 'reload_query' in st.session_state:
             st.session_state.reload_query = ""
+        if 'auto_submit' in st.session_state:
+            st.session_state.auto_submit = False
         
         # Add to search history
         if query not in st.session_state.search_history:
@@ -1328,6 +1334,7 @@ def main():
                                             help=rel_q
                                         ):
                                             st.session_state.reload_query = rel_q
+                                            st.session_state.auto_submit = True
                                             st.rerun()
                         
                         # Display relationships

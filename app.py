@@ -1075,58 +1075,58 @@ def main():
             "Simple Retrieval": [
                 {
                     "icon": "📋",
-                    "question": "What are the eligibility requirements for lung cancer screening?",
+                    "question": "What are the coverage requirements for lung cancer screening?",
                     "description": "Direct policy lookup"
                 },
                 {
                     "icon": "💊",
-                    "question": "What HCPCS codes are covered for preventive services?",
-                    "description": "Code identification"
+                    "question": "What is the Medicare Part D prescription drug plan?",
+                    "description": "Plan details"
                 },
                 {
                     "icon": "🏥",
-                    "question": "What are the NCD requirements for cardiovascular screening?",
-                    "description": "Coverage criteria"
+                    "question": "What are Medicare beneficiaries eligible for?",
+                    "description": "Eligibility overview"
                 }
             ],
-            "Relationship Analysis": [
+            "Entity Connections": [
                 {
                     "icon": "🔗",
-                    "question": "How do the 2026 Part D redesign rules impact out-of-pocket costs for beneficiaries?",
-                    "description": "Policy impact analysis"
+                    "question": "How does Medicare Part D connect to prescription drug coverage?",
+                    "description": "Policy relationships"
                 },
                 {
                     "icon": "🧬",
-                    "question": "How are LDCT screening and lung cancer prevention policies connected?",
-                    "description": "Entity relationships"
+                    "question": "What is the relationship between LDCT screening and lung cancer?",
+                    "description": "Procedure connections"
                 },
                 {
                     "icon": "📊",
-                    "question": "What is the relationship between NCDs, LCDs, and local contractors?",
+                    "question": "How do National Coverage Determinations affect local contractors?",
                     "description": "Coverage hierarchy"
                 }
             ],
-            "Cross-Manual Logic": [
+            "Complex Queries": [
                 {
                     "icon": "🔀",
-                    "question": "Based on the Benefit Policy Manual, when does a telehealth service shift from Part A to Part B coverage?",
-                    "description": "Multi-source reasoning"
+                    "question": "What policies affect Medicare Advantage beneficiaries?",
+                    "description": "Multi-entity analysis"
                 },
                 {
                     "icon": "🎯",
-                    "question": "How do Claims Processing Manual rules interact with National Coverage Determinations for new technologies?",
-                    "description": "Policy integration"
+                    "question": "What are the out-of-pocket costs for Medicare Part D?",
+                    "description": "Cost analysis"
                 },
                 {
                     "icon": "⚖️",
-                    "question": "What are the billing differences between Medicare Advantage and Original Medicare for preventive services?",
-                    "description": "Comparative analysis"
+                    "question": "How do discount programs work with Medicare Part D?",
+                    "description": "Program integration"
                 }
             ]
         }
         
         # Display suggestions in tabs
-        tabs = st.tabs(["📋 Simple Retrieval", "🔗 Relationship Analysis", "🔀 Cross-Manual Logic"])
+        tabs = st.tabs(["📋 Simple Retrieval", "🔗 Entity Connections", "🔀 Complex Queries"])
         
         for tab_idx, (level_name, questions) in enumerate(suggestions.items()):
             with tabs[tab_idx]:

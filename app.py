@@ -607,16 +607,20 @@ def create_graph_visualization(entities: List[Dict], paths: List[Dict]):
     """Create clean static graph using NetworkX + matplotlib."""
     G = nx.DiGraph()
     
-    # Add nodes with colors
-    node_colors = []
-    for entity in entities:
-        G.add_node(entity["name"])
-        color = {"policy": "#3B82F6", "organization": "#10B981", "procedure": "#8B5CF6"}.get(entity.get("type"), "#6B7280")
-        node_colors.append(color)
+    # Create entity type mapping
+    entity_types = {entity["name"]: entity.get("type", "unknown") for entity in entities}
     
-    # Add edges
+    # Add edges first (this creates all nodes)
     for path in paths:
         G.add_edge(path["origin"], path["target"], label=path["relationship"])
+    
+    # Now assign colors to ALL nodes in the graph
+    color_map = {"policy": "#3B82F6", "organization": "#10B981", "procedure": "#8B5CF6"}
+    node_colors = []
+    for node in G.nodes():
+        node_type = entity_types.get(node, "unknown")
+        color = color_map.get(node_type, "#6B7280")
+        node_colors.append(color)
     
     # Compact layout
     pos = nx.spring_layout(G, k=1.8, iterations=80, seed=42)

@@ -601,6 +601,7 @@ def run_graphrag_query(query: str, mode: str) -> Dict[str, Any]:
     result = synthesize_answer(query, {"entities": entities, "paths": paths})
     result["entities"] = entities
     result["graph_paths"] = paths
+    result["query"] = query  # Store query for validation
     return result
 
 def create_graph_visualization(entities: List[Dict], paths: List[Dict]):
@@ -660,6 +661,7 @@ def handle_question_click(question: str):
     """Handle suggested question click."""
     st.session_state.query = question
     st.session_state.auto_search = True
+    st.session_state.current_results = None  # Clear old results
 
 def simulate_progress(steps: List[str]):
     """Show progress through GraphRAG steps."""

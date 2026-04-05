@@ -693,22 +693,21 @@ st.markdown("### 🔍 Ask Your Question")
 
 col1, col2 = st.columns([5, 1])
 with col1:
-    query = st.text_input(
+    st.text_input(
         "Enter your Medicare policy question:",
-        value=st.session_state.query,
+        key="query",
         placeholder="e.g., What are the eligibility requirements for preventive services?",
         label_visibility="collapsed"
     )
-    # Sync typed input back to session state
-    if query != st.session_state.query:
-        st.session_state.query = query
         
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 
+# Get query from session state
+query = st.session_state.query
+
 # Execute Search
 if (search_button or st.session_state.auto_search) and query:
-    st.session_state.query = query
     st.session_state.auto_search = False
     st.session_state.current_results = None  # Clear old results before new query
     

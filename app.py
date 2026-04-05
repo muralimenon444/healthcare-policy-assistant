@@ -403,45 +403,61 @@ def retrieve_text_chunks(chunk_ids: List[int], text_units_df: pd.DataFrame) -> L
     
     return passages
 
-def detect_entities_in_query(query: str, entities_df: pd.DataFrame, top_k: int = 5) -> List[Dict[str, Any]]:
-    """Detect entities mentioned in the query by keyword matching."""
-    query_lower = query.lower()
-    query_words = set(re.findall(r'\w+', query_lower))
+def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passages: List[Dict]) -> Dict[str, Any]:
+    """Synthesize answer from retrieved context."""
+    if not entities or not passages:
+        return {
+            'executive_summary': f"I searched the Medicare policy knowledge graph for your query but could not find sufficient relevant information about: **{query}**",
+            'detailed_analysis': "This could mean the topic is not yet covered in the current knowledge graph, or the query needs rephrasing. Try asking about Medicare Part A/B/C/D, preventive services, LDCT screening, Inflation Reduction Act, or DME equipment coverage.",
+            'temporal_metadata': {},
+            'knowledge_gaps': ["No relevant data found in the CMS Medicare Coverage Database"],
+            'related_questions': []
+        }
     
-    # Score each entity based on keyword overlap
-    entity_scores = []
-    for idx, row in entities_df.iterrows():
-        entity_text = row['text'].lower()
-        entity_name_lower = entity_text
+    # Build executive summary
+    main_entities = [e['name'] for e in entities[:3]]
+    entity_list = ', '.join(main_entities)
+    
+    exec_summary = f"Based on the knowledge graph analysis, your query relates to: **{entity_list}**. "
+    
+    if passages:
+        exec_summary += f"Found {len(passages)} relevant policy documents with information about these topics."
+    
+    # Build detailed analysis
+    detailed = f"**Entities Detected:** {len(entities)}\n\n"
+    
+    if paths:
+        detailed += "**Key Relationships:**\n"
+        for path in paths[:5]:
+            detailed += f"- {path['origin']} **{path['relationship']}** {path['target']}\n"
+    
+    # Extract document sources
+    citations = list(set([p['source'] for p in passages])) if passages else []
+    
+    # Generate related questions based on entities
+    related_q = []
+    if entities:
+        for e in entities[:4]:
+            related_q.append(f"Tell me more about {e['name']}")
         
-        # Exact substring match gets highest score
-        if entity_name_lower in query_lower or query_lower in entity_name_lower:
-            score = 10.0
-        else:
-            entity_words = set(re.findall(r'\w+', entity_text))
-            overlap = len(query_words & entity_words)
-            
-            if overlap == 0:
-                continue
-                
-            # Bonus for longer word matches
-            score = overlap
-            for word in query_words:
-                if len(word) > 3 and word in entity_text:
-                    score += 2
+        # Add contextual follow-ups
+        if len(entities) > 1:
+            related_q.append(f"How are {entities[0]['name']} and {entities[1]['name']} related?")
         
-        entity_scores.append({
-            'name': row['text'],
-            'type': row['type'],
-            'score': score / max(len(query_words), 1),
-            'chunk_id': row['chunk_id']
-        })
+        # Add coverage question
+        related_q.append(f"What are the eligibility requirements for {entities[0]['name']}?")
     
-    # Sort by score and return top k
-    entity_scores.sort(key=lambda x: x['score'], reverse=True)
-    
-    # Filter out low scores
-    return [e for e in entity_scores[:top_k] if e['score'] > 0.3]
+    return {
+        'executive_summary': exec_summary,
+        'detailed_analysis': detailed,
+        'temporal_metadata': {
+            'last_updated': datetime.now().strftime("%Y-%m-%d"),
+            'policy_version': "Medicare Coverage Database 2024"
+        },
+        'knowledge_gaps': [],
+        'citations': citations,
+        'related_questions': related_q[:6]
+    }
 
 def run_graphrag_query(query: str, mode: str) -> Dict[str, Any]:
     """
@@ -677,21 +693,16 @@ st.markdown("### 🔍 Ask Your Question")
 
 col1, col2 = st.columns([5, 1])
 with col1:
-    # Sync query to session state before rendering
-    if 'query' not in st.session_state:
-        st.session_state.query = ""
-
     query = st.text_input(
         "Enter your Medicare policy question:",
         value=st.session_state.query,
         placeholder="e.g., What are the eligibility requirements for preventive services?",
         label_visibility="collapsed"
     )
-
-    # Update session state when user types
+    # Sync typed input back to session state
     if query != st.session_state.query:
         st.session_state.query = query
-
+        
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 

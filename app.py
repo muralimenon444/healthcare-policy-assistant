@@ -693,25 +693,23 @@ st.markdown("### 🔍 Ask Your Question")
 
 col1, col2 = st.columns([5, 1])
 with col1:
-    user_input = st.text_input(
+    query_input = st.text_input(
         "Enter your Medicare policy question:",
         value=st.session_state.query,
         placeholder="e.g., What are the eligibility requirements for preventive services?",
-        label_visibility="collapsed",
-        key="user_query_input"
+        label_visibility="collapsed"
     )
         
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 
-# Update query from user input
-if user_input != st.session_state.query:
-    st.session_state.query = user_input
-
-# Execute Search - Manual search button click
-if search_button:
-    if st.session_state.query:
-        current_query = st.session_state.query
+# Execute Search
+if search_button or st.session_state.auto_search:
+    # Use the current query from input or session state
+    current_query = query_input if search_button else st.session_state.query
+    
+    if current_query:
+        st.session_state.query = current_query
         st.session_state.auto_search = False
         st.session_state.current_results = None
         
@@ -732,7 +730,7 @@ if search_button:
             "mode": st.session_state.search_mode
         })
         st.rerun()
-
+        
 # Execute Search - Auto-search from clicked questions
 elif st.session_state.auto_search:
     if st.session_state.query:
@@ -757,7 +755,7 @@ elif st.session_state.auto_search:
             "mode": st.session_state.search_mode
         })
         st.rerun()
-        
+
 # ============================================================================
 # RESULTS DISPLAY
 # ============================================================================

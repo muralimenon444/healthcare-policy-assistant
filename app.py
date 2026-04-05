@@ -251,6 +251,9 @@ if 'query' not in st.session_state:
 if 'auto_search' not in st.session_state:
     st.session_state.auto_search = False
 
+if 'last_searched_query' not in st.session_state:
+    st.session_state.last_searched_query = ""
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -584,7 +587,6 @@ def handle_question_click(question: str):
     """Handle suggested question click - updates search bar and triggers search."""
     st.session_state.query = question
     st.session_state.auto_search = True
-    st.session_state.current_results = None
     st.rerun()
 
 def simulate_progress(steps: List[str]):
@@ -703,66 +705,43 @@ with col1:
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 
-# Execute Search
-if search_button or st.session_state.auto_search:
-    # Use the current query from input or session state
-    current_query = query_input if search_button else st.session_state.query
+# Determine which query to search
+search_query = None
+
+if search_button and query_input:
+    # Manual search from button
+    search_query = query_input
+    st.session_state.auto_search = False
+elif st.session_state.auto_search and st.session_state.query:
+    # Auto-search from clicked question
+    search_query = st.session_state.query
+    st.session_state.auto_search = False
+
+# Execute search if we have a query
+if search_query and search_query != st.session_state.last_searched_query:
+    st.session_state.query = search_query
+    st.session_state.last_searched_query = search_query
     
-    if current_query:
-        st.session_state.query = current_query
-        st.session_state.auto_search = False
-        st.session_state.current_results = None
-        
-        with st.spinner(""):
-            simulate_progress([
-                "Detecting entities in query...",
-                "Traversing knowledge graph...",
-                "Computing community centrality...",
-                "Synthesizing answer from context..."
-            ])
-        
-        results = run_graphrag_query(current_query, st.session_state.search_mode)
-        results['query'] = current_query
-        st.session_state.current_results = results
-        st.session_state.search_history.append({
-            "query": current_query,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "mode": st.session_state.search_mode
-        })
-        st.rerun()
-        
-# Execute Search - Auto-search from clicked questions
-elif st.session_state.auto_search:
-    if st.session_state.query:
-        current_query = st.session_state.query
-        st.session_state.auto_search = False
-        st.session_state.current_results = None
-        
-        with st.spinner(""):
-            simulate_progress([
-                "Detecting entities in query...",
-                "Traversing knowledge graph...",
-                "Computing community centrality...",
-                "Synthesizing answer from context..."
-            ])
-        
-        results = run_graphrag_query(current_query, st.session_state.search_mode)
-        results['query'] = current_query
-        st.session_state.current_results = results
-        st.session_state.search_history.append({
-            "query": current_query,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "mode": st.session_state.search_mode
-        })
-        st.rerun()
+    with st.spinner(""):
+        simulate_progress([
+            "Detecting entities in query...",
+            "Traversing knowledge graph...",
+            "Computing community centrality...",
+            "Synthesizing answer from context..."
+        ])
+    
+    results = run_graphrag_query(search_query, st.session_state.search_mode)
+    st.session_state.current_results = results
+    st.session_state.search_history.append({
+        "query": search_query,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "mode": st.session_state.search_mode
+    })
+    st.rerun()
 
 # ============================================================================
 # RESULTS DISPLAY
 # ============================================================================
-
-# Safety check: Clear results if they don't match current query
-# if st.session_state.current_results and st.session_state.current_results.get("query") != st.session_state.query:
-#    st.session_state.current_results = None
 
 if st.session_state.current_results:
     results = st.session_state.current_results

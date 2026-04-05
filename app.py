@@ -1,4 +1,3 @@
-content = '''# v2.9 - All requested UX fixes applied and internally tested
 """
 Last Updated: 2026-04-05 14:00:00
 Version: PRODUCTION v2.9
@@ -893,4 +892,5 @@ if st.session_state.search_history:
             with col2:
                 if st.button("🔄", key=f"history_{i}"):
                     handle_question_click(item['query'])
-'
+                    st.rerun()
+                    

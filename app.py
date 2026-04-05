@@ -689,29 +689,14 @@ with st.expander("🚀 Quick Start - Suggested Questions", expanded=(st.session_
                 handle_question_click(q)
 
 # Search Interface
-st.markdown("### 🔍 Ask Your Question")
-
-col1, col2 = st.columns([5, 1])
-with col1:
-    user_input = st.text_input(
-        "Enter your Medicare policy question:",
-        value=st.session_state.query,
-        placeholder="e.g., What are the eligibility requirements for preventive services?",
-        label_visibility="collapsed",
-        key="user_query_input"
-    )
-        
-with col2:
-    search_button = st.button("🔍 Search", use_container_width=True, type="primary")
-
-# Update query from user input
-if user_input != st.session_state.query:
-    st.session_state.query = user_input
-
-# Execute Search
+# Execute Search - FIXED VERSION
 if search_button and st.session_state.query:
+    current_query = st.session_state.query  # Capture it NOW
     st.session_state.auto_search = False
     st.session_state.current_results = None
+    
+    # DEBUG - remove this after testing
+    st.info(f"🔍 Searching for: {current_query}")
     
     with st.spinner(""):
         simulate_progress([
@@ -721,10 +706,11 @@ if search_button and st.session_state.query:
             "Synthesizing answer from context..."
         ])
     
-    results = run_graphrag_query(st.session_state.query, st.session_state.search_mode)
+    results = run_graphrag_query(current_query, st.session_state.search_mode)  # Use captured query
+    results['query'] = current_query  # Force set the query in results
     st.session_state.current_results = results
     st.session_state.search_history.append({
-        "query": st.session_state.query,
+        "query": current_query,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "mode": st.session_state.search_mode
     })
@@ -732,8 +718,12 @@ if search_button and st.session_state.query:
 
 # Auto-search from clicked questions
 if st.session_state.auto_search and st.session_state.query:
+    current_query = st.session_state.query  # Capture it NOW
     st.session_state.auto_search = False
     st.session_state.current_results = None
+    
+    # DEBUG - remove this after testing
+    st.info(f"🔍 Auto-searching for: {current_query}")
     
     with st.spinner(""):
         simulate_progress([
@@ -743,10 +733,11 @@ if st.session_state.auto_search and st.session_state.query:
             "Synthesizing answer from context..."
         ])
     
-    results = run_graphrag_query(st.session_state.query, st.session_state.search_mode)
+    results = run_graphrag_query(current_query, st.session_state.search_mode)  # Use captured query
+    results['query'] = current_query  # Force set the query in results
     st.session_state.current_results = results
     st.session_state.search_history.append({
-        "query": st.session_state.query,
+        "query": current_query,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "mode": st.session_state.search_mode
     })
@@ -757,8 +748,8 @@ if st.session_state.auto_search and st.session_state.query:
 # ============================================================================
 
 # Safety check: Clear results if they don't match current query
-if st.session_state.current_results and st.session_state.current_results.get("query") != st.session_state.query:
-    st.session_state.current_results = None
+# if st.session_state.current_results and st.session_state.current_results.get("query") != st.session_state.query:
+#    st.session_state.current_results = None
 
 if st.session_state.current_results:
     results = st.session_state.current_results

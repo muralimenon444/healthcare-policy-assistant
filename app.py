@@ -693,23 +693,25 @@ st.markdown("### 🔍 Ask Your Question")
 
 col1, col2 = st.columns([5, 1])
 with col1:
-    st.text_input(
+    user_input = st.text_input(
         "Enter your Medicare policy question:",
-        key="query",
+        value=st.session_state.query,
         placeholder="e.g., What are the eligibility requirements for preventive services?",
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="user_query_input"
     )
         
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 
-# Get query from session state
-query = st.session_state.query
+# Update query from user input
+if user_input != st.session_state.query:
+    st.session_state.query = user_input
 
 # Execute Search
-if (search_button or st.session_state.auto_search) and query:
+if search_button and st.session_state.query:
     st.session_state.auto_search = False
-    st.session_state.current_results = None  # Clear old results before new query
+    st.session_state.current_results = None
     
     with st.spinner(""):
         simulate_progress([
@@ -719,10 +721,32 @@ if (search_button or st.session_state.auto_search) and query:
             "Synthesizing answer from context..."
         ])
     
-    results = run_graphrag_query(query, st.session_state.search_mode)
+    results = run_graphrag_query(st.session_state.query, st.session_state.search_mode)
     st.session_state.current_results = results
     st.session_state.search_history.append({
-        "query": query,
+        "query": st.session_state.query,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "mode": st.session_state.search_mode
+    })
+    st.rerun()
+
+# Auto-search from clicked questions
+if st.session_state.auto_search and st.session_state.query:
+    st.session_state.auto_search = False
+    st.session_state.current_results = None
+    
+    with st.spinner(""):
+        simulate_progress([
+            "Detecting entities in query...",
+            "Traversing knowledge graph...",
+            "Computing community centrality...",
+            "Synthesizing answer from context..."
+        ])
+    
+    results = run_graphrag_query(st.session_state.query, st.session_state.search_mode)
+    st.session_state.current_results = results
+    st.session_state.search_history.append({
+        "query": st.session_state.query,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "mode": st.session_state.search_mode
     })

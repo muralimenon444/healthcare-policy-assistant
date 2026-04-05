@@ -693,13 +693,21 @@ st.markdown("### 🔍 Ask Your Question")
 
 col1, col2 = st.columns([5, 1])
 with col1:
+    # Sync query to session state before rendering
+    if 'query' not in st.session_state:
+        st.session_state.query = ""
+
     query = st.text_input(
         "Enter your Medicare policy question:",
-        value=st.session_state.get("query", ""),
+        value=st.session_state.query,
         placeholder="e.g., What are the eligibility requirements for preventive services?",
-        label_visibility="collapsed",
-        key="search_input"
+        label_visibility="collapsed"
     )
+
+    # Update session state when user types
+    if query != st.session_state.query:
+        st.session_state.query = query
+
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 

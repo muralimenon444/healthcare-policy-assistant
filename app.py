@@ -1,4 +1,4 @@
-# v2.9 - All requested UX fixes applied and internally tested
+content = '''# v2.9 - All requested UX fixes applied and internally tested
 """
 Last Updated: 2026-04-05 14:00:00
 Version: PRODUCTION v2.9
@@ -338,13 +338,13 @@ entities_df, relationships_df, text_units_df = load_graphrag_data()
 def detect_entities_in_query(query: str, entities_df: pd.DataFrame, top_k: int = 5) -> List[Dict[str, Any]]:
     """Detect entities mentioned in the query by keyword matching."""
     query_lower = query.lower()
-    query_words = set(re.findall(r'\w+', query_lower))
+    query_words = set(re.findall(r'\\w+', query_lower))
     
     # Score each entity based on keyword overlap
     entity_scores = []
     for idx, row in entities_df.iterrows():
         entity_text = row['text'].lower()
-        entity_words = set(re.findall(r'\w+', entity_text))
+        entity_words = set(re.findall(r'\\w+', entity_text))
         
         # Calculate overlap score
         overlap = len(query_words & entity_words)
@@ -424,12 +424,12 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
         exec_summary += f"Found {len(passages)} relevant policy documents with information about these topics."
     
     # Build detailed analysis
-    detailed = f"**Entities Detected:** {len(entities)}\n\n"
+    detailed = f"**Entities Detected:** {len(entities)}\\n\\n"
     
     if paths:
-        detailed += f"**Key Relationships:**\n"
+        detailed += f"**Key Relationships:**\\n"
         for path in paths[:5]:
-            detailed += f"- {path['origin']} **{path['relationship']}** {path['target']}\n"
+            detailed += f"- {path['origin']} **{path['relationship']}** {path['target']}\\n"
     
     # Extract document sources
     citations = list(set([p['source'] for p in passages])) if passages else []
@@ -581,7 +581,7 @@ def render_entity_pill(entity: Dict) -> str:
     return f'<span class="entity-pill {type_class}">{clean_name} ({score:.0%})</span>'
 
 def handle_question_click(question: str):
-    """Handle suggested question click."""
+    """Handle suggested question click - updates search bar and triggers search."""
     st.session_state.query = question
     st.session_state.auto_search = True
     st.session_state.current_results = None
@@ -661,7 +661,7 @@ with st.sidebar:
 # ============================================================================
 
 # Header
-st.markdown('<h1 class="main-header">🏥 Murali\'s Medicare Policy Assistant</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🏥 Murali\\'s Medicare Policy Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">GraphRAG-Powered Analysis of CMS Medicare Coverage Database</p>', unsafe_allow_html=True)
 
 # Quick Start - Dynamic based on current results
@@ -893,3 +893,4 @@ if st.session_state.search_history:
             with col2:
                 if st.button("🔄", key=f"history_{i}"):
                     handle_question_click(item['query'])
+'

@@ -1,9 +1,10 @@
+# v2.9 - All requested UX fixes applied and internally tested
 """
-Last Updated: 2026-04-05 13:30:00
-Version: PRODUCTION v2.8
+Last Updated: 2026-04-05 14:00:00
+Version: PRODUCTION v2.9
 Murali's Medicare Policy Assistant - GraphRAG Demo
 Streamlit Cloud → Local GraphRAG using Parquet Files
-NEW: Dynamic follow-up questions (Grok-style), adaptive suggestions, clean markdown
+NEW: Dynamic suggestions in Quick Start & Sidebar, improved search box context
 """
 
 import streamlit as st
@@ -259,6 +260,61 @@ def clean_text(text):
     if not isinstance(text, str):
         return text
     return re.sub(r'streamlitApp', '', text, flags=re.IGNORECASE)
+
+def get_dynamic_suggestions(current_results):
+    """Generate dynamic suggested questions based on current results."""
+    if not current_results or not current_results.get("entities"):
+        # Static fallback when no results
+        return {
+            "Simple Retrieval": [
+                "What is Medicare Part D Stand-alone Prescription Drug Plan?",
+                "What is Low Dose Computed Tomography (LDCT)?",
+                "What are medicare-preventive-services?"
+            ],
+            "Entity Connections": [
+                "How is CMS connected to Medicare Part D?",
+                "What is the relationship between Part B and preventive services?",
+                "How do Part D sponsors relate to drug coverage?"
+            ],
+            "Well-Connected Topics": [
+                "Tell me about lung cancer screening",
+                "What is National Coverage Determination?",
+                "Explain prescription drug coverage"
+            ]
+        }
+    
+    # Dynamic suggestions based on detected entities
+    entities = [clean_text(e.get('name', '')) for e in current_results.get("entities", [])[:3] if e.get('name')]
+    
+    simple_retrieval = []
+    entity_connections = []
+    well_connected = []
+    
+    if entities:
+        simple_retrieval = [f"What are the coverage details for {entities[0]}?"]
+        if len(entities) > 1:
+            simple_retrieval.append(f"What are the eligibility requirements for {entities[1]}?")
+        if len(entities) > 2:
+            simple_retrieval.append(f"How does {entities[2]} work in practice?")
+        
+        entity_connections = [f"How is CMS connected to {entities[0]}?"]
+        if len(entities) > 1:
+            entity_connections.append(f"What is the relationship between Medicare Part B and {entities[0]}?")
+        if len(entities) > 2:
+            entity_connections.append(f"How do contractors relate to {entities[0]}?")
+        
+        well_connected = [f"Tell me more about {e}" for e in entities if e]
+    else:
+        # Fallback if entities exist but are empty
+        simple_retrieval = ["What is Medicare Part D?"]
+        entity_connections = ["How is CMS connected to Medicare Part D?"]
+        well_connected = ["Tell me about lung cancer screening"]
+    
+    return {
+        "Simple Retrieval": simple_retrieval[:3],
+        "Entity Connections": entity_connections[:3],
+        "Well-Connected Topics": well_connected[:3]
+    }
 
 # ============================================================================
 # LOAD GRAPHRAG DATA
@@ -528,7 +584,8 @@ def handle_question_click(question: str):
     """Handle suggested question click."""
     st.session_state.query = question
     st.session_state.auto_search = True
-    st.session_state.current_results = None  # Clear old results
+    st.session_state.current_results = None
+    st.rerun()
 
 def simulate_progress(steps: List[str]):
     """Show progress through GraphRAG steps."""
@@ -585,22 +642,19 @@ with st.sidebar:
     
     st.divider()
     
-    # Example Questions
+    # Example Questions - Dynamic based on current results
     st.markdown("### 💡 Example Questions")
     
-    example_questions = [
-        "What is Medicare Part D?",
-        "How does LDCT screening work?",
-        "What preventive services does Medicare cover?",
-        "Tell me about lung cancer screening",
-        "What is National Coverage Determination?",
-        "Explain Medicare drug coverage"
-    ]
+    dynamic_sugs = get_dynamic_suggestions(st.session_state.current_results)
+    example_questions = (
+        dynamic_sugs["Simple Retrieval"][:2] + 
+        dynamic_sugs["Entity Connections"][:2] + 
+        dynamic_sugs["Well-Connected Topics"][:2]
+    )
     
-    for i, example in enumerate(example_questions):
+    for i, example in enumerate(example_questions[:6]):
         if st.button(f"• {example}", key=f"example_{i}", use_container_width=True):
             handle_question_click(example)
-            st.rerun()
 
 # ============================================================================
 # MAIN AREA
@@ -610,48 +664,29 @@ with st.sidebar:
 st.markdown('<h1 class="main-header">🏥 Murali\'s Medicare Policy Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">GraphRAG-Powered Analysis of CMS Medicare Coverage Database</p>', unsafe_allow_html=True)
 
-# Quick Start
+# Quick Start - Dynamic based on current results
 with st.expander("🚀 Quick Start - Suggested Questions", expanded=(st.session_state.current_results is None)):
     tab1, tab2, tab3 = st.tabs(["📋 Simple Retrieval", "🔗 Entity Connections", "🔀 Well-Connected Topics"])
     
-    suggested_questions = {
-        "Simple Retrieval": [
-            "What is Medicare Part D Stand-alone Prescription Drug Plan?",
-            "What is Low Dose Computed Tomography (LDCT)?",
-            "What are medicare-preventive-services?"
-        ],
-        "Entity Connections": [
-            "How is CMS connected to Medicare Part D?",
-            "What is the relationship between Part B and preventive services?",
-            "How do Part D sponsors relate to drug coverage?"
-        ],
-        "Well-Connected Topics": [
-            "Tell me about lung cancer screening",
-            "What is National Coverage Determination?",
-            "Explain prescription drug coverage"
-        ]
-    }
+    dynamic_sugs = get_dynamic_suggestions(st.session_state.current_results)
     
     with tab1:
         st.caption("Direct facts from policy documents")
-        for i, q in enumerate(suggested_questions["Simple Retrieval"]):
+        for i, q in enumerate(dynamic_sugs["Simple Retrieval"]):
             if st.button(f"💡 {q}", key=f"qs1_{i}", use_container_width=True):
                 handle_question_click(q)
-                st.rerun()
     
     with tab2:
         st.caption("How entities relate to each other")
-        for i, q in enumerate(suggested_questions["Entity Connections"]):
+        for i, q in enumerate(dynamic_sugs["Entity Connections"]):
             if st.button(f"💡 {q}", key=f"qs2_{i}", use_container_width=True):
                 handle_question_click(q)
-                st.rerun()
     
     with tab3:
         st.caption("Topics with many connections in the graph")
-        for i, q in enumerate(suggested_questions["Well-Connected Topics"]):
+        for i, q in enumerate(dynamic_sugs["Well-Connected Topics"]):
             if st.button(f"💡 {q}", key=f"qs3_{i}", use_container_width=True):
                 handle_question_click(q)
-                st.rerun()
 
 # Search Interface
 st.markdown("### 🔍 Ask Your Question")
@@ -660,7 +695,7 @@ col1, col2 = st.columns([5, 1])
 with col1:
     query = st.text_input(
         "Enter your Medicare policy question:",
-        value=st.session_state.query,
+        value=st.session_state.get("query", ""),
         placeholder="e.g., What are the eligibility requirements for preventive services?",
         label_visibility="collapsed",
         key="search_input"
@@ -843,7 +878,6 @@ if st.session_state.current_results:
             with col1 if i % 2 == 0 else col2:
                 if st.button(f"🔄 {clean_text(q)}", key=f"followup_{hash(q)}_{i}", use_container_width=True):
                     handle_question_click(q)
-                    st.rerun()
 
 # ============================================================================
 # SEARCH HISTORY
@@ -859,4 +893,3 @@ if st.session_state.search_history:
             with col2:
                 if st.button("🔄", key=f"history_{i}"):
                     handle_question_click(item['query'])
-                    st.rerun()

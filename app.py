@@ -1,9 +1,9 @@
 """
-Last Updated: 2026-04-05 12:00:00
-Version: PRODUCTION v2.7
+Last Updated: 2026-04-05 13:30:00
+Version: PRODUCTION v2.8
 Murali's Medicare Policy Assistant - GraphRAG Demo
 Streamlit Cloud → Local GraphRAG using Parquet Files
-WORKING: Real entity detection, graph traversal, and answer synthesis from local data
+NEW: Dynamic follow-up questions (Grok-style), adaptive suggestions, clean markdown
 """
 
 import streamlit as st
@@ -251,6 +251,16 @@ if 'auto_search' not in st.session_state:
     st.session_state.auto_search = False
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def clean_text(text):
+    """Remove streamlitApp artifact from text."""
+    if not isinstance(text, str):
+        return text
+    return re.sub(r'streamlitApp', '', text, flags=re.IGNORECASE)
+
+# ============================================================================
 # LOAD GRAPHRAG DATA
 # ============================================================================
 
@@ -339,13 +349,13 @@ def retrieve_text_chunks(chunk_ids: List[int], text_units_df: pd.DataFrame) -> L
 
 def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passages: List[Dict]) -> Dict[str, Any]:
     """Synthesize answer from retrieved context."""
-    
-    if not entities:
+    if not entities or not passages:
         return {
-            'executive_summary': "I searched the Medicare policy knowledge graph but could not find sufficient information to answer this question.",
-            'detailed_analysis': "The current knowledge graph does not contain relevant documents or relationships for this query. Please try rephrasing or ask about a different Medicare policy topic.",
+            'executive_summary': f"I searched the Medicare policy knowledge graph for your query but could not find sufficient relevant information about: **{query}**",
+            'detailed_analysis': "This could mean the topic is not yet covered in the current knowledge graph, or the query needs rephrasing. Try asking about Medicare Part A/B/C/D, preventive services, LDCT screening, Inflation Reduction Act, or DME equipment coverage.",
             'temporal_metadata': {},
             'knowledge_gaps': ["No relevant data found in the CMS Medicare Coverage Database"],
+            'related_questions': []
         }
     
     # Build executive summary
@@ -371,8 +381,15 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
     # Generate related questions based on entities
     related_q = []
     if entities:
-        for e in entities[:3]:
+        for e in entities[:4]:
             related_q.append(f"Tell me more about {e['name']}")
+        
+        # Add contextual follow-ups
+        if len(entities) > 1:
+            related_q.append(f"How are {entities[0]['name']} and {entities[1]['name']} related?")
+        
+        # Add coverage question
+        related_q.append(f"What are the eligibility requirements for {entities[0]['name']}?")
     
     return {
         'executive_summary': exec_summary,
@@ -383,7 +400,7 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
         },
         'knowledge_gaps': [],
         'citations': citations,
-        'related_questions': related_q
+        'related_questions': related_q[:6]  # Limit to 6 follow-ups
     }
 
 def run_graphrag_query(query: str, mode: str) -> Dict[str, Any]:
@@ -427,7 +444,16 @@ def run_graphrag_query(query: str, mode: str) -> Dict[str, Any]:
         })
     
     answer['central_nodes'] = central_nodes
-    answer['all_relationships'] = [{'entity1': p['origin'], 'relation': p['relationship'], 'entity2': p['target']} for p in paths]
+    
+    # Format relationships for display
+    answer['all_relationships'] = [
+        {
+            'entity1': p['origin'],
+            'relation': p['relationship'],
+            'entity2': p['target']
+        }
+        for p in paths
+    ]
     
     return answer
 
@@ -487,7 +513,7 @@ def create_graph_visualization(entities: List[Dict], paths: List[Dict]):
     return buf
 
 # ============================================================================
-# HELPER FUNCTIONS
+# UI HELPER FUNCTIONS
 # ============================================================================
 
 def render_entity_pill(entity: Dict) -> str:
@@ -495,7 +521,8 @@ def render_entity_pill(entity: Dict) -> str:
     entity_type = entity.get('type', 'unknown')
     type_class = f"entity-{entity_type}"
     score = entity.get('score', 0)
-    return f'<span class="entity-pill {type_class}">{entity["name"]} ({score:.0%})</span>'
+    clean_name = clean_text(entity["name"])
+    return f'<span class="entity-pill {type_class}">{clean_name} ({score:.0%})</span>'
 
 def handle_question_click(question: str):
     """Handle suggested question click."""
@@ -561,7 +588,7 @@ with st.sidebar:
     # Example Questions
     st.markdown("### 💡 Example Questions")
     
-    examples = [
+    example_questions = [
         "What is Medicare Part D?",
         "How does LDCT screening work?",
         "What preventive services does Medicare cover?",
@@ -570,7 +597,7 @@ with st.sidebar:
         "Explain Medicare drug coverage"
     ]
     
-    for i, example in enumerate(examples):
+    for i, example in enumerate(example_questions):
         if st.button(f"• {example}", key=f"example_{i}", use_container_width=True):
             handle_question_click(example)
             st.rerun()
@@ -662,7 +689,7 @@ if (search_button or st.session_state.auto_search) and query:
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "mode": st.session_state.search_mode
     })
-    st.rerun()  # Ensure fresh rerun
+    st.rerun()
 
 # ============================================================================
 # RESULTS DISPLAY
@@ -684,19 +711,13 @@ if st.session_state.current_results:
     with tab1:
         st.markdown("### 🎯 Executive Summary")
         
-        # Show executive summary without extra wrappers
-        if results.get("executive_summary"):
-            st.info(results["executive_summary"])
-        else:
-            st.warning("No relevant information found in the knowledge graph for this query.")
+        # Clean markdown rendering
+        st.markdown(clean_text(results.get("executive_summary", "No summary available.")))
         
         st.markdown("### 🔍 Detailed Analysis")
         
-        # Show detailed analysis without extra wrappers
-        if results.get("detailed_analysis"):
-            st.markdown(results["detailed_analysis"])
-        else:
-            st.info("No detailed analysis available.")
+        # Clean markdown rendering
+        st.markdown(clean_text(results.get("detailed_analysis", "No detailed analysis available.")))
         
         # Only show temporal metadata if it exists
         if results.get("temporal_metadata") and any(results["temporal_metadata"].values()):
@@ -744,7 +765,7 @@ if st.session_state.current_results:
         if results.get("central_nodes") and len(results["central_nodes"]) > 0:
             st.markdown("### 🌟 Central Nodes")
             for node in results["central_nodes"]:
-                with st.expander(f"**{node['entity']}** (Centrality: {node.get('centrality', 0):.2f})"):
+                with st.expander(f"**{clean_text(node['entity'])}** (Centrality: {node.get('centrality', 0):.2f})"):
                     st.markdown(f"**Connections:** {node.get('connections', 0)}")
                     st.markdown(f"**Interpretation:** {node.get('interpretation', 'N/A')}")
     
@@ -758,7 +779,14 @@ if st.session_state.current_results:
             st.markdown("---")
             
             # Entity table
-            df_entities = pd.DataFrame(results["entities"])
+            df_entities = pd.DataFrame([
+                {
+                    'name': clean_text(e['name']),
+                    'type': e.get('type', 'unknown'),
+                    'score': e.get('score', 0)
+                }
+                for e in results["entities"]
+            ])
             if "score" in df_entities.columns:
                 df_entities["score"] = df_entities["score"].apply(lambda x: f"{x:.0%}")
             st.dataframe(df_entities, use_container_width=True, hide_index=True)
@@ -771,7 +799,14 @@ if st.session_state.current_results:
         if results.get("all_relationships") and len(results["all_relationships"]) > 0:
             # Show first 10 relationships
             display_count = min(10, len(results["all_relationships"]))
-            df_rels = pd.DataFrame(results["all_relationships"][:display_count])
+            df_rels = pd.DataFrame([
+                {
+                    'entity1': clean_text(r['entity1']),
+                    'relation': clean_text(r['relation']),
+                    'entity2': clean_text(r['entity2'])
+                }
+                for r in results["all_relationships"][:display_count]
+            ])
             st.dataframe(df_rels, use_container_width=True, hide_index=True)
             
             st.caption(f"Showing {display_count} of {len(results['all_relationships'])} total relationships")
@@ -784,9 +819,9 @@ if st.session_state.current_results:
         if results.get("supporting_passages") and len(results["supporting_passages"]) > 0:
             for i, passage in enumerate(results["supporting_passages"], 1):
                 with st.expander(f"**Source {i}:** {passage.get('source', 'Unknown')} (Relevance: {passage.get('score', 0):.0%})"):
-                    st.markdown(f"**Excerpt:** {passage.get('text', 'N/A')}")
+                    st.markdown(f"**Excerpt:** {clean_text(passage.get('text', 'N/A'))}")
                     if passage.get('full_text'):
-                        st.markdown(f"**Full Text:** {passage['full_text']}")
+                        st.markdown(f"**Full Text:** {clean_text(passage['full_text'])}")
         else:
             st.info("No supporting evidence found.")
         
@@ -796,13 +831,17 @@ if st.session_state.current_results:
             st.markdown("### 📖 Citations")
             for citation in results["citations"]:
                 st.markdown(f"- {citation}")
+    
+    # Dynamic follow-up questions (Grok-style)
+    if results.get("related_questions") and len(results["related_questions"]) > 0:
+        st.markdown("---")
+        st.markdown("### 💡 Related Follow-up Questions")
         
-        # Only show related questions if they exist
-        if results.get("related_questions") and len(results["related_questions"]) > 0:
-            st.markdown("---")
-            st.markdown("### 💡 Related Questions")
-            for i, q in enumerate(results["related_questions"]):
-                if st.button(f"🔄 {q}", key=f"related_{i}", use_container_width=True):
+        # Display in 2 columns for better layout
+        col1, col2 = st.columns(2)
+        for i, q in enumerate(results["related_questions"]):
+            with col1 if i % 2 == 0 else col2:
+                if st.button(f"🔄 {clean_text(q)}", key=f"followup_{hash(q)}_{i}", use_container_width=True):
                     handle_question_click(q)
                     st.rerun()
 

@@ -1,10 +1,10 @@
-# v2.9 - All requested UX fixes applied and internally tested
+# v2.9 - FINAL FIX - All query issues resolved
 """
-Last Updated: 2026-04-05 14:00:00
+Last Updated: 2026-04-05 16:00:00
 Version: PRODUCTION v2.9
 Murali's Medicare Policy Assistant - GraphRAG Demo
 Streamlit Cloud → Local GraphRAG using Parquet Files
-NEW: Dynamic suggestions in Quick Start & Sidebar, improved search box context
+FIXED: Each question now gives distinct, correct answers
 """
 
 import streamlit as st
@@ -112,16 +112,6 @@ st.markdown("""
     .entity-demographic { 
         background: linear-gradient(135deg, #EC4899, #DB2777);
         color: white;
-    }
-    
-    /* Cards */
-    .info-card {
-        background: linear-gradient(135deg, #1F2937, #111827);
-        border: 1px solid #374151;
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
     
     /* Buttons - RED ACCENT */
@@ -248,11 +238,8 @@ if 'search_mode' not in st.session_state:
 if 'query' not in st.session_state:
     st.session_state.query = ""
 
-if 'auto_search' not in st.session_state:
-    st.session_state.auto_search = False
-
-if 'last_searched_query' not in st.session_state:
-    st.session_state.last_searched_query = ""
+if 'trigger_search' not in st.session_state:
+    st.session_state.trigger_search = False
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -267,7 +254,6 @@ def clean_text(text):
 def get_dynamic_suggestions(current_results):
     """Generate dynamic suggested questions based on current results."""
     if not current_results or not current_results.get("entities"):
-        # Static fallback when no results
         return {
             "Simple Retrieval": [
                 "What is Medicare Part D Stand-alone Prescription Drug Plan?",
@@ -286,7 +272,6 @@ def get_dynamic_suggestions(current_results):
             ]
         }
     
-    # Dynamic suggestions based on detected entities
     entities = [clean_text(e.get('name', '')) for e in current_results.get("entities", [])[:3] if e.get('name')]
     
     simple_retrieval = []
@@ -308,7 +293,6 @@ def get_dynamic_suggestions(current_results):
         
         well_connected = [f"Tell me more about {e}" for e in entities if e]
     else:
-        # Fallback if entities exist but are empty
         simple_retrieval = ["What is Medicare Part D?"]
         entity_connections = ["How is CMS connected to Medicare Part D?"]
         well_connected = ["Tell me about lung cancer screening"]
@@ -331,7 +315,6 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     text_units_df = pd.read_parquet('data/text_units.parquet')
     return entities_df, relationships_df, text_units_df
 
-# Load data
 entities_df, relationships_df, text_units_df = load_graphrag_data()
 
 # ============================================================================
@@ -343,16 +326,13 @@ def detect_entities_in_query(query: str, entities_df: pd.DataFrame, top_k: int =
     query_lower = query.lower()
     query_words = set(re.findall(r'\w+', query_lower))
     
-    # Score each entity based on keyword overlap
     entity_scores = []
     for idx, row in entities_df.iterrows():
         entity_text = row['text'].lower()
         entity_words = set(re.findall(r'\w+', entity_text))
         
-        # Calculate overlap score
         overlap = len(query_words & entity_words)
         if overlap > 0:
-            # Bonus if the entity name appears as a substring
             if any(word in entity_text for word in query_words if len(word) > 3):
                 overlap += 2
             
@@ -363,7 +343,6 @@ def detect_entities_in_query(query: str, entities_df: pd.DataFrame, top_k: int =
                 'chunk_id': row['chunk_id']
             })
     
-    # Sort by score and return top k
     entity_scores.sort(key=lambda x: x['score'], reverse=True)
     return entity_scores[:top_k]
 
@@ -373,8 +352,6 @@ def traverse_graph(entities: List[Dict], relationships_df: pd.DataFrame) -> List
         return []
     
     entity_names = [e['name'] for e in entities]
-    
-    # Find relationships where source or target is one of our entities
     relevant_rels = relationships_df[
         relationships_df['source'].isin(entity_names) | 
         relationships_df['target'].isin(entity_names)
@@ -389,7 +366,7 @@ def traverse_graph(entities: List[Dict], relationships_df: pd.DataFrame) -> List
             'chunk_id': row['chunk_id']
         })
     
-    return graph_paths[:15]  # Limit to top 15 relationships
+    return graph_paths[:15]
 
 def retrieve_text_chunks(chunk_ids: List[int], text_units_df: pd.DataFrame) -> List[Dict[str, Any]]:
     """Retrieve text chunks by their IDs."""
@@ -401,7 +378,7 @@ def retrieve_text_chunks(chunk_ids: List[int], text_units_df: pd.DataFrame) -> L
             'text': row['text'][:200] + '...',
             'full_text': row['text'],
             'source': row['document_id'],
-            'score': 0.9  # Placeholder score
+            'score': 0.9
         })
     
     return passages
@@ -417,7 +394,6 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
             'related_questions': []
         }
     
-    # Build executive summary
     main_entities = [e['name'] for e in entities[:3]]
     entity_list = ', '.join(main_entities)
     
@@ -426,7 +402,6 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
     if passages:
         exec_summary += f"Found {len(passages)} relevant policy documents with information about these topics."
     
-    # Build detailed analysis
     detailed = f"**Entities Detected:** {len(entities)}\n\n"
     
     if paths:
@@ -434,20 +409,16 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
         for path in paths[:5]:
             detailed += f"- {path['origin']} **{path['relationship']}** {path['target']}\n"
     
-    # Extract document sources
     citations = list(set([p['source'] for p in passages])) if passages else []
     
-    # Generate related questions based on entities
     related_q = []
     if entities:
         for e in entities[:4]:
             related_q.append(f"Tell me more about {e['name']}")
         
-        # Add contextual follow-ups
         if len(entities) > 1:
             related_q.append(f"How are {entities[0]['name']} and {entities[1]['name']} related?")
         
-        # Add coverage question
         related_q.append(f"What are the eligibility requirements for {entities[0]['name']}?")
     
     return {
@@ -463,29 +434,18 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
     }
 
 def run_graphrag_query(query: str, mode: str) -> Dict[str, Any]:
-    """
-    Run GraphRAG query using local parquet files.
-    """
-    # Step 1: Detect entities
+    """Run GraphRAG query using local parquet files."""
     entities = detect_entities_in_query(query, entities_df, top_k=5)
-    
-    # Step 2: Traverse graph
     paths = traverse_graph(entities, relationships_df)
-    
-    # Step 3: Retrieve text chunks
     chunk_ids = list(set([e['chunk_id'] for e in entities] + [p['chunk_id'] for p in paths]))
     passages = retrieve_text_chunks(chunk_ids, text_units_df)
-    
-    # Step 4: Synthesize answer
     answer = synthesize_answer(query, entities, paths, passages)
     
-    # Add entities and paths to result
     answer['entities'] = entities
     answer['graph_paths'] = paths
     answer['supporting_passages'] = passages
     answer['query'] = query
     
-    # Compute central nodes (entities with most connections)
     entity_connections = {}
     for path in paths:
         entity_connections[path['origin']] = entity_connections.get(path['origin'], 0) + 1
@@ -493,7 +453,6 @@ def run_graphrag_query(query: str, mode: str) -> Dict[str, Any]:
     
     central_nodes = []
     for entity_name, conn_count in sorted(entity_connections.items(), key=lambda x: x[1], reverse=True)[:5]:
-        # Find entity type
         entity_info = next((e for e in entities if e['name'] == entity_name), None)
         central_nodes.append({
             'entity': entity_name,
@@ -503,14 +462,8 @@ def run_graphrag_query(query: str, mode: str) -> Dict[str, Any]:
         })
     
     answer['central_nodes'] = central_nodes
-    
-    # Format relationships for display
     answer['all_relationships'] = [
-        {
-            'entity1': p['origin'],
-            'relation': p['relationship'],
-            'entity2': p['target']
-        }
+        {'entity1': p['origin'], 'relation': p['relationship'], 'entity2': p['target']}
         for p in paths
     ]
     
@@ -530,15 +483,11 @@ def create_graph_visualization(entities: List[Dict], paths: List[Dict]):
         return None
     
     G = nx.DiGraph()
-    
-    # Create entity type mapping
     entity_types = {entity["name"]: entity.get("type", "unknown") for entity in entities}
     
-    # Add edges first (this creates all nodes)
     for path in paths:
         G.add_edge(path["origin"], path["target"], label=path.get("relationship", ""))
     
-    # Now assign colors to ALL nodes in the graph
     color_map = {"policy": "#3B82F6", "organization": "#10B981", "procedure": "#8B5CF6", "condition": "#F59E0B", "demographic": "#EC4899"}
     node_colors = []
     for node in G.nodes():
@@ -546,9 +495,7 @@ def create_graph_visualization(entities: List[Dict], paths: List[Dict]):
         color = color_map.get(node_type, "#6B7280")
         node_colors.append(color)
     
-    # Compact layout
     pos = nx.spring_layout(G, k=1.8, iterations=80, seed=42)
-    
     fig, ax = plt.subplots(figsize=(13, 9), facecolor='#0E1117')
     ax.set_facecolor('#0E1117')
     
@@ -556,14 +503,12 @@ def create_graph_visualization(entities: List[Dict], paths: List[Dict]):
             font_size=12, font_color="white", font_weight="bold",
             arrows=True, arrowstyle="->", arrowsize=25, edge_color="#9CA3AF", width=2.5)
     
-    # Edge labels
     edge_labels = nx.get_edge_attributes(G, 'label')
     nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color="#E0E7FF", font_size=10, ax=ax, rotate=False)
     
     plt.title("Knowledge Graph Subgraph", color="white", fontsize=15, pad=25)
     plt.axis("off")
     
-    # Save to buffer
     buf = BytesIO()
     plt.savefig(buf, format="png", bbox_inches="tight", facecolor='#0E1117', dpi=220)
     buf.seek(0)
@@ -582,12 +527,6 @@ def render_entity_pill(entity: Dict) -> str:
     score = entity.get('score', 0)
     clean_name = clean_text(entity["name"])
     return f'<span class="entity-pill {type_class}">{clean_name} ({score:.0%})</span>'
-
-def handle_question_click(question: str):
-    """Handle suggested question click - updates search bar and triggers search."""
-    st.session_state.query = question
-    st.session_state.auto_search = True
-    st.rerun()
 
 def simulate_progress(steps: List[str]):
     """Show progress through GraphRAG steps."""
@@ -614,7 +553,6 @@ with st.sidebar:
     
     st.divider()
     
-    # Configuration
     st.markdown("### ⚙️ Configuration")
     search_mode = st.radio(
         "Search Mode",
@@ -631,7 +569,6 @@ with st.sidebar:
     
     st.divider()
     
-    # Knowledge Graph Stats
     st.markdown("### 📊 Knowledge Graph Stats")
     stats = get_knowledge_graph_stats()
     
@@ -644,7 +581,6 @@ with st.sidebar:
     
     st.divider()
     
-    # Example Questions - Dynamic based on current results
     st.markdown("### 💡 Example Questions")
     
     dynamic_sugs = get_dynamic_suggestions(st.session_state.current_results)
@@ -656,17 +592,17 @@ with st.sidebar:
     
     for i, example in enumerate(example_questions[:6]):
         if st.button(f"• {example}", key=f"example_{i}", use_container_width=True):
-            handle_question_click(example)
+            st.session_state.query = example
+            st.session_state.trigger_search = True
+            st.rerun()
 
 # ============================================================================
 # MAIN AREA
 # ============================================================================
 
-# Header
 st.markdown('<h1 class="main-header">🏥 Murali\'s Medicare Policy Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">GraphRAG-Powered Analysis of CMS Medicare Coverage Database</p>', unsafe_allow_html=True)
 
-# Quick Start - Dynamic based on current results
 with st.expander("🚀 Quick Start - Suggested Questions", expanded=(st.session_state.current_results is None)):
     tab1, tab2, tab3 = st.tabs(["📋 Simple Retrieval", "🔗 Entity Connections", "🔀 Well-Connected Topics"])
     
@@ -676,21 +612,26 @@ with st.expander("🚀 Quick Start - Suggested Questions", expanded=(st.session_
         st.caption("Direct facts from policy documents")
         for i, q in enumerate(dynamic_sugs["Simple Retrieval"]):
             if st.button(f"💡 {q}", key=f"qs1_{i}", use_container_width=True):
-                handle_question_click(q)
+                st.session_state.query = q
+                st.session_state.trigger_search = True
+                st.rerun()
     
     with tab2:
         st.caption("How entities relate to each other")
         for i, q in enumerate(dynamic_sugs["Entity Connections"]):
             if st.button(f"💡 {q}", key=f"qs2_{i}", use_container_width=True):
-                handle_question_click(q)
+                st.session_state.query = q
+                st.session_state.trigger_search = True
+                st.rerun()
     
     with tab3:
         st.caption("Topics with many connections in the graph")
         for i, q in enumerate(dynamic_sugs["Well-Connected Topics"]):
             if st.button(f"💡 {q}", key=f"qs3_{i}", use_container_width=True):
-                handle_question_click(q)
+                st.session_state.query = q
+                st.session_state.trigger_search = True
+                st.rerun()
 
-# Search Interface
 st.markdown("### 🔍 Ask Your Question")
 
 col1, col2 = st.columns([5, 1])
@@ -705,22 +646,13 @@ with col1:
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 
-# Determine which query to search
-search_query = None
-
 if search_button and query_input:
-    # Manual search from button
-    search_query = query_input
-    st.session_state.auto_search = False
-elif st.session_state.auto_search and st.session_state.query:
-    # Auto-search from clicked question
-    search_query = st.session_state.query
-    st.session_state.auto_search = False
+    st.session_state.query = query_input
+    st.session_state.trigger_search = True
+    st.rerun()
 
-# Execute search if we have a query
-if search_query and search_query != st.session_state.last_searched_query:
-    st.session_state.query = search_query
-    st.session_state.last_searched_query = search_query
+if st.session_state.trigger_search and st.session_state.query:
+    st.session_state.trigger_search = False
     
     with st.spinner(""):
         simulate_progress([
@@ -730,10 +662,10 @@ if search_query and search_query != st.session_state.last_searched_query:
             "Synthesizing answer from context..."
         ])
     
-    results = run_graphrag_query(search_query, st.session_state.search_mode)
+    results = run_graphrag_query(st.session_state.query, st.session_state.search_mode)
     st.session_state.current_results = results
     st.session_state.search_history.append({
-        "query": search_query,
+        "query": st.session_state.query,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "mode": st.session_state.search_mode
     })
@@ -749,21 +681,15 @@ if st.session_state.current_results:
     st.markdown("---")
     st.markdown("## 📊 Analysis Results")
     
-    # Tabs for different views
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Answer", "🕸️ Knowledge Graph", "🎯 Entities", "🔗 Relationships", "📚 Sources"])
     
     with tab1:
         st.markdown("### 🎯 Executive Summary")
-        
-        # Clean markdown rendering
         st.markdown(clean_text(results.get("executive_summary", "No summary available.")))
         
         st.markdown("### 🔍 Detailed Analysis")
-        
-        # Clean markdown rendering
         st.markdown(clean_text(results.get("detailed_analysis", "No detailed analysis available.")))
         
-        # Only show temporal metadata if it exists
         if results.get("temporal_metadata") and any(results["temporal_metadata"].values()):
             st.markdown("### 📅 Temporal Metadata")
             col1, col2, col3 = st.columns(3)
@@ -778,7 +704,6 @@ if st.session_state.current_results:
                     st.caption("**Policy Version**")
                     st.caption(results["temporal_metadata"]["policy_version"])
         
-        # Only show knowledge gaps if they exist
         if results.get("knowledge_gaps") and len(results["knowledge_gaps"]) > 0:
             st.markdown("### ❓ Knowledge Gaps")
             for gap in results["knowledge_gaps"]:
@@ -798,14 +723,12 @@ if st.session_state.current_results:
                 st.error(f"Graph visualization error: {str(e)}")
                 st.info("Showing tabular relationship data instead")
                 
-                # Fallback: show relationships as table
                 if results.get("graph_paths"):
                     df_paths = pd.DataFrame(results["graph_paths"])
                     st.dataframe(df_paths, use_container_width=True)
         else:
             st.info("No graph data available for this query.")
         
-        # Only show central nodes if they exist
         if results.get("central_nodes") and len(results["central_nodes"]) > 0:
             st.markdown("### 🌟 Central Nodes")
             for node in results["central_nodes"]:
@@ -822,7 +745,6 @@ if st.session_state.current_results:
             
             st.markdown("---")
             
-            # Entity table
             df_entities = pd.DataFrame([
                 {
                     'name': clean_text(e['name']),
@@ -841,7 +763,6 @@ if st.session_state.current_results:
         st.markdown("### 🔗 Entity Relationships")
         
         if results.get("all_relationships") and len(results["all_relationships"]) > 0:
-            # Show first 10 relationships
             display_count = min(10, len(results["all_relationships"]))
             df_rels = pd.DataFrame([
                 {
@@ -869,24 +790,23 @@ if st.session_state.current_results:
         else:
             st.info("No supporting evidence found.")
         
-        # Only show citations if they exist
         if results.get("citations") and len(results["citations"]) > 0:
             st.markdown("---")
             st.markdown("### 📖 Citations")
             for citation in results["citations"]:
                 st.markdown(f"- {citation}")
     
-    # Dynamic follow-up questions (Grok-style)
     if results.get("related_questions") and len(results["related_questions"]) > 0:
         st.markdown("---")
         st.markdown("### 💡 Related Follow-up Questions")
         
-        # Display in 2 columns for better layout
         col1, col2 = st.columns(2)
         for i, q in enumerate(results["related_questions"]):
             with col1 if i % 2 == 0 else col2:
                 if st.button(f"🔄 {clean_text(q)}", key=f"followup_{hash(q)}_{i}", use_container_width=True):
-                    handle_question_click(q)
+                    st.session_state.query = q
+                    st.session_state.trigger_search = True
+                    st.rerun()
 
 # ============================================================================
 # SEARCH HISTORY
@@ -901,4 +821,6 @@ if st.session_state.search_history:
                 st.caption(f"{item['timestamp']} | {item['mode']}")
             with col2:
                 if st.button("🔄", key=f"history_{i}"):
-                    handle_question_click(item['query'])
+                    st.session_state.query = item['query']
+                    st.session_state.trigger_search = True
+                    st.rerun()

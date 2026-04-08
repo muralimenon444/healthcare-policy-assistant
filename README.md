@@ -79,8 +79,6 @@ Runs on **Databricks Serverless Compute** for automatic scaling and resource opt
 
 ## License
 
-## License
-
 This project is licensed under the **MIT License**.
 
 Copyright (c) 2026 Murali Menon

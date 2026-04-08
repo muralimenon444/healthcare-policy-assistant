@@ -1,5 +1,7 @@
 # Healthcare Policy Assistant: GraphRAG Intelligence
 
+**Live App:** [https://healthcare-policy-assistant-mm.streamlit.app/](https://healthcare-policy-assistant-mm.streamlit.app/)
+
 ## Project Overview
 The Healthcare Policy Assistant is a production-grade AI system designed for high-precision retrieval and analysis of complex CMS Medicare policy documentation. Utilizing **GraphRAG** (Graph-based Retrieval Augmented Generation), the system transforms unstructured regulatory data into a semantic knowledge graph, providing accurate, traceable, and context-aware responses.
 

@@ -333,7 +333,12 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Query a table via SQL Statement Execution API."""
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         
-        sql = f"SELECT * FROM {table_name}"
+        # Optimize text_units - only load metadata, not full text (51MB!)
+        if "text_units" in table_name:
+            sql = f"SELECT id, document_id, chunk_index FROM {table_name}"
+            st.info("📊 Loading metadata only (text excluded to avoid timeout)")
+        else:
+            sql = f"SELECT * FROM {table_name}"
         payload = {
             "warehouse_id": warehouse_id,
             "statement": sql,
@@ -342,6 +347,8 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         
         try:
             st.write(f"📊 Querying {table_name}...")
+            if "text_units" in table_name:
+                st.info("⏳ text_units is large (51MB) - may take 2-3 minutes...")
             resp = requests.post(
                 f"{workspace_url}/api/2.0/sql/statements/",
                 headers=headers,
@@ -358,7 +365,7 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             status = result.get("status", {}).get("state")
             
             # Poll for completion (up to 2 minutes)
-            for _ in range(60):
+            for _ in range(150):  # 5 minutes total
                 if status == "SUCCEEDED":
                     break
                 time.sleep(2)

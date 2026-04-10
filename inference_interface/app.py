@@ -309,82 +309,115 @@ def get_dynamic_suggestions(current_results):
 
 @st.cache_data
 def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load data from Databricks Unity Catalog tables using Databricks SDK."""
+    """Load data from Databricks Unity Catalog tables using SQL Statement Execution API."""
     import os
-    from databricks.sdk import WorkspaceClient
-    from databricks.sdk.core import Config
+    import requests
+    import time
     
-    # Get credentials from Streamlit secrets
-    host = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST"))
+    # Get credentials
+    workspace_url = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST"))
     token = st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
     warehouse_id = st.secrets.get("DATABRICKS_WAREHOUSE_ID", "e7ab584a1feb58ef")
     
-    if not host or not token:
+    if not workspace_url or not token:
         st.error("❌ Missing DATABRICKS_HOST or DATABRICKS_TOKEN in Streamlit secrets!")
         st.stop()
     
-    # Ensure proper URL format
-    if not host.startswith('https://'):
-        host = f"https://{host}"
+    # Format URL
+    if not workspace_url.startswith('https://'):
+        workspace_url = f"https://{workspace_url}"
     
-    st.info(f"🔗 Connecting to: {host}")
+    st.info(f"🔗 Connecting to: {workspace_url}")
     
-    try:
-        # Initialize Databricks SDK
-        config = Config(
-            host=host,
-            token=token
-        )
-        w = WorkspaceClient(config=config)
+    def query_table(table_name: str) -> pd.DataFrame:
+        """Query a table via SQL Statement Execution API."""
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         
-        def query_table(table_name: str) -> pd.DataFrame:
-            """Query table and return as DataFrame."""
-            import time
+        sql = f"SELECT * FROM {table_name}"
+        payload = {
+            "warehouse_id": warehouse_id,
+            "statement": sql,
+            "wait_timeout": "50s"
+        }
+        
+        try:
+            st.write(f"📊 Querying {table_name}...")
+            resp = requests.post(
+                f"{workspace_url}/api/2.0/sql/statements/",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
             
-            with st.spinner(f"📊 Loading {table_name}..."):
-                # Execute query without waiting (returns immediately)
-                result = w.statement_execution.execute_statement(
-                    warehouse_id=warehouse_id,
-                    statement=f"SELECT * FROM {table_name}",
-                    wait_timeout="0s"  # Don't wait, poll manually
+            if resp.status_code != 200:
+                st.error(f"❌ API Error {resp.status_code}: {resp.text}")
+                st.stop()
+            
+            result = resp.json()
+            statement_id = result["statement_id"]
+            status = result.get("status", {}).get("state")
+            
+            # Poll for completion (up to 2 minutes)
+            for _ in range(60):
+                if status == "SUCCEEDED":
+                    break
+                time.sleep(2)
+                status_resp = requests.get(
+                    f"{workspace_url}/api/2.0/sql/statements/{statement_id}",
+                    headers=headers
                 )
+                if status_resp.status_code == 200:
+                    result = status_resp.json()
+                    status = result.get("status", {}).get("state")
+            
+            if status != "SUCCEEDED":
+                st.error(f"❌ Query failed with status: {status}")
+                st.stop()
+            
+            # Get results - handle both inline and chunked
+            manifest = result.get("manifest", {})
+            columns = [c["name"] for c in manifest.get("schema", {}).get("columns", [])]
+            
+            # Check if result is inline or needs chunking
+            result_data = result.get("result")
+            if result_data and "data_array" in result_data:
+                # Inline result (small tables)
+                rows = result_data["data_array"]
+                df = pd.DataFrame(rows, columns=columns)
+            else:
+                # Chunked result (large tables)
+                all_rows = []
+                chunks = manifest.get("chunks", [])
                 
-                # Poll for completion (up to 5 minutes)
-                statement_id = result.statement_id
-                max_wait = 300  # 5 minutes
-                waited = 0
+                for chunk_info in chunks:
+                    chunk_index = chunk_info.get("chunk_index", 0)
+                    chunk_resp = requests.get(
+                        f"{workspace_url}/api/2.0/sql/statements/{statement_id}/result/chunks/{chunk_index}",
+                        headers=headers
+                    )
+                    
+                    if chunk_resp.status_code == 200:
+                        chunk_data = chunk_resp.json()
+                        for row in chunk_data.get("data_array", []):
+                            all_rows.append(row)
                 
-                while result.status.state in ["PENDING", "RUNNING"] and waited < max_wait:
-                    time.sleep(2)
-                    waited += 2
-                    result = w.statement_execution.get_statement(statement_id)
-                
-                if result.status.state != "SUCCEEDED":
-                    raise Exception(f"Query failed with state: {result.status.state}")
-                
-                # Convert result to DataFrame
-                if result.result and result.result.data_array:
-                    columns = [col.name for col in result.manifest.schema.columns]
-                    rows = result.result.data_array
-                    df = pd.DataFrame(rows, columns=columns)
-                    st.success(f"✅ Loaded {len(df):,} rows from {table_name}")
-                    return df
-                else:
-                    st.warning(f"⚠️ No data returned from {table_name}")
-                    return pd.DataFrame()
-        
-        # Load all three tables
-        entities_df = query_table("research_catalog.healthcare.graphrag_entities")
-        relationships_df = query_table("research_catalog.healthcare.graphrag_relationships")
-        text_units_df = query_table("research_catalog.healthcare.graphrag_text_units")
-        
-        return entities_df, relationships_df, text_units_df
-        
-    except Exception as e:
-        st.error(f"❌ Failed to load data: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        st.stop()
+                df = pd.DataFrame(all_rows, columns=columns)
+            
+            st.success(f"✅ Loaded {len(df):,} rows from {table_name}")
+            return df
+            
+        except Exception as e:
+            st.error(f"❌ Exception querying {table_name}: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            st.stop()
+    
+    # Load all three tables
+    entities_df = query_table("research_catalog.healthcare.graphrag_entities")
+    relationships_df = query_table("research_catalog.healthcare.graphrag_relationships")
+    text_units_df = query_table("research_catalog.healthcare.graphrag_text_units")
+    
+    return entities_df, relationships_df, text_units_df
 
 entities_df, relationships_df, text_units_df = load_graphrag_data()
 

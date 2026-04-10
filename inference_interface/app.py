@@ -378,7 +378,7 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
                 if chunk_resp.status_code == 200:
                     for row in chunk_resp.json().get("data_array", []):
                         rows.append([item.get("str_value") or item.get("int_value") or item.get("long_value") 
-                                   for item in row.get("data_array", [])])
+                                   for item in row])
             
             st.success(f"✅ Loaded {len(rows)} rows from {table_name}")
             return pd.DataFrame(rows, columns=columns)

@@ -332,16 +332,25 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     st.info(f"📊 Using warehouse: {warehouse_id}")
     
     def query_table(table_name: str) -> pd.DataFrame:
-        """Query a table via SQL Statement Execution API."""
+        """Query a table via SQL Statement Execution API with support for large results."""
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         
         sql = f"SELECT * FROM {table_name}"
-        payload = {"warehouse_id": warehouse_id, "statement": sql, "wait_timeout": "50s"}
+        payload = {
+            "warehouse_id": warehouse_id,
+            "statement": sql,
+            "wait_timeout": "50s",
+            "disposition": "EXTERNAL_LINKS"  # Use external links for large results
+        }
         
         try:
             st.write(f"Querying {table_name}...")
-            resp = requests.post(f"{workspace_url}/api/2.0/sql/statements/", 
-                                headers=headers, json=payload, timeout=60)
+            resp = requests.post(
+                f"{workspace_url}/api/2.0/sql/statements/",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
             
             if resp.status_code != 200:
                 st.error(f"❌ API Error {resp.status_code}: {resp.text}")
@@ -351,12 +360,15 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             st_id = result["statement_id"]
             status = result.get("status", {}).get("state")
             
-            # Poll
+            # Poll for completion
             for _ in range(30):
                 if status == "SUCCEEDED":
                     break
                 time.sleep(2)
-                status_resp = requests.get(f"{workspace_url}/api/2.0/sql/statements/{st_id}", headers=headers)
+                status_resp = requests.get(
+                    f"{workspace_url}/api/2.0/sql/statements/{st_id}",
+                    headers=headers
+                )
                 if status_resp.status_code == 200:
                     result = status_resp.json()
                     status = result.get("status", {}).get("state")
@@ -366,21 +378,47 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
                 st.json(result.get("status", {}))
                 st.stop()
             
-            # Parse results
+            # Parse results - EXTERNAL_LINKS gives us download URLs
             manifest = result.get("manifest", {})
             columns = [c["name"] for c in manifest.get("schema", {}).get("columns", [])]
             
-            rows = []
-            for chunk in manifest.get("chunks", []):
-                chunk_resp = requests.get(
-                    f"{workspace_url}/api/2.0/sql/statements/{st_id}/result/chunks/{chunk['chunk_index']}",
-                    headers=headers)
-                if chunk_resp.status_code == 200:
-                    for row in chunk_resp.json().get("data_array", []):
-                        rows.append(row)  # row is already a list of values
+            all_rows = []
+            chunks = manifest.get("chunks", [])
             
-            st.success(f"✅ Loaded {len(rows)} rows from {table_name}")
-            return pd.DataFrame(rows, columns=columns)
+            if not chunks:
+                # Empty result
+                df = pd.DataFrame(columns=columns)
+            else:
+                # Download chunks
+                for chunk_info in chunks:
+                    # EXTERNAL_LINKS provides external_links instead of inline data
+                    external_links = chunk_info.get("external_links")
+                    
+                    if external_links:
+                        # Download from external link
+                        for link in external_links:
+                            chunk_url = link.get("external_link")
+                            if chunk_url:
+                                chunk_resp = requests.get(chunk_url, timeout=30)
+                                if chunk_resp.status_code == 200:
+                                    chunk_data = chunk_resp.json()
+                                    for row in chunk_data.get("data_array", []):
+                                        all_rows.append(row)
+                    else:
+                        # Fallback to inline data (for small results)
+                        chunk_index = chunk_info.get("chunk_index", 0)
+                        chunk_resp = requests.get(
+                            f"{workspace_url}/api/2.0/sql/statements/{st_id}/result/chunks/{chunk_index}",
+                            headers=headers
+                        )
+                        if chunk_resp.status_code == 200:
+                            for row in chunk_resp.json().get("data_array", []):
+                                all_rows.append(row)
+                
+                df = pd.DataFrame(all_rows, columns=columns)
+            
+            st.success(f"✅ Loaded {len(df)} rows from {table_name}")
+            return df
             
         except Exception as e:
             st.error(f"❌ Exception: {str(e)}")

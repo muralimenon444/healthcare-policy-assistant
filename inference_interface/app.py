@@ -340,7 +340,7 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             "warehouse_id": warehouse_id,
             "statement": sql,
             "wait_timeout": "50s",
-            "disposition": "EXTERNAL_LINKS"  # Use external links for large results
+            "disposition": "EXTERNAL_LINKS",  # Use external links for large results
             "format": "JSON_ARRAY"  # Explicitly request JSON format
         }
         

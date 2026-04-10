@@ -310,60 +310,31 @@ def get_dynamic_suggestions(current_results):
 @st.cache_data
 def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load parquet files from Databricks Unity Catalog Volumes."""
-    try:
-        # Try to use Databricks SDK (when running in Databricks)
-        from databricks.sdk import WorkspaceClient
-        w = WorkspaceClient()
-        
-        # Read directly from Unity Catalog Volumes
-        base_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
-        entities_df = pd.read_parquet(f'{base_path}/entities.parquet')
-        relationships_df = pd.read_parquet(f'{base_path}/relationships.parquet')
-        text_units_df = pd.read_parquet(f'{base_path}/text_units.parquet')
-        
-        return entities_df, relationships_df, text_units_df
-        
-    except (ImportError, Exception) as e:
-        # Fallback: Use Databricks REST API with authentication
-        # This works from external deployments like Streamlit Cloud
-        import os
-        import requests
-        
-        # Get credentials from Streamlit secrets
-        workspace_url = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST"))
-        token = st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
-        
-        if not workspace_url or not token:
-            st.error("⚠️ Databricks credentials not configured in Streamlit secrets!")
-            st.info("Add DATABRICKS_HOST and DATABRICKS_TOKEN to your Streamlit Cloud secrets.")
-            st.stop()
-        
-        # Download files from Databricks using Files API
-        headers = {"Authorization": f"Bearer {token}"}
-        base_url = f"https://{workspace_url}/api/2.0/fs/files"
-        volume_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
-        
-        files_to_load = {
-            "entities": f"{volume_path}/entities.parquet",
-            "relationships": f"{volume_path}/relationships.parquet",
-            "text_units": f"{volume_path}/text_units.parquet"
-        }
-        
-        dataframes = {}
-        for name, file_path in files_to_load.items():
-            response = requests.get(
-                f"{base_url}{file_path}",
-                headers=headers,
-                stream=True
-            )
-            
-            if response.status_code == 200:
-                dataframes[name] = pd.read_parquet(BytesIO(response.content))
-            else:
-                st.error(f"Failed to load {name}: {response.status_code}")
-                st.stop()
-        
-        return dataframes["entities"], dataframes["relationships"], dataframes["text_units"]
+    import os
+    from databricks.sdk import WorkspaceClient
+    
+    # Authenticate with Databricks using Streamlit secrets
+    workspace_host = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST", ""))
+    token = st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN", ""))
+    
+    if not workspace_host or not token:
+        st.error("❌ Missing Databricks credentials in Streamlit secrets!")
+        st.stop()
+    
+    # Initialize Databricks client for authentication
+    os.environ["DATABRICKS_HOST"] = workspace_host if workspace_host.startswith("https://") else f"https://{workspace_host}"
+    os.environ["DATABRICKS_TOKEN"] = token
+    
+    w = WorkspaceClient(host=os.environ["DATABRICKS_HOST"], token=token)
+    
+    # Now pandas can read from Unity Catalog Volumes
+    volume_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
+    
+    entities_df = pd.read_parquet(f'{volume_path}/entities.parquet')
+    relationships_df = pd.read_parquet(f'{volume_path}/relationships.parquet')
+    text_units_df = pd.read_parquet(f'{volume_path}/text_units.parquet')
+    
+    return entities_df, relationships_df, text_units_df
 entities_df, relationships_df, text_units_df = load_graphrag_data()
 
 # ============================================================================

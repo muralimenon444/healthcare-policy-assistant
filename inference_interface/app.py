@@ -339,13 +339,28 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         
         def query_table(table_name: str) -> pd.DataFrame:
             """Query table and return as DataFrame."""
+            import time
+            
             with st.spinner(f"📊 Loading {table_name}..."):
-                # Execute query using SDK
+                # Execute query without waiting (returns immediately)
                 result = w.statement_execution.execute_statement(
                     warehouse_id=warehouse_id,
                     statement=f"SELECT * FROM {table_name}",
-                    wait_timeout="2m"
+                    wait_timeout="0s"  # Don't wait, poll manually
                 )
+                
+                # Poll for completion (up to 5 minutes)
+                statement_id = result.statement_id
+                max_wait = 300  # 5 minutes
+                waited = 0
+                
+                while result.status.state in ["PENDING", "RUNNING"] and waited < max_wait:
+                    time.sleep(2)
+                    waited += 2
+                    result = w.statement_execution.get_statement(statement_id)
+                
+                if result.status.state != "SUCCEEDED":
+                    raise Exception(f"Query failed with state: {result.status.state}")
                 
                 # Convert result to DataFrame
                 if result.result and result.result.data_array:

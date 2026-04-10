@@ -309,129 +309,68 @@ def get_dynamic_suggestions(current_results):
 
 @st.cache_data
 def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load data from Databricks Unity Catalog tables using SQL API."""
+    """Load data from Databricks Unity Catalog tables using Databricks SDK."""
     import os
-    import requests
-    import time
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.core import Config
     
-    # Get credentials
-    workspace_url = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST"))
+    # Get credentials from Streamlit secrets
+    host = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST"))
     token = st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
     warehouse_id = st.secrets.get("DATABRICKS_WAREHOUSE_ID", "e7ab584a1feb58ef")
     
-    if not workspace_url or not token:
+    if not host or not token:
         st.error("❌ Missing DATABRICKS_HOST or DATABRICKS_TOKEN in Streamlit secrets!")
-        st.info("Go to Streamlit Cloud → App Settings → Secrets")
         st.stop()
     
-    # Format URL
-    if not workspace_url.startswith('https://'):
-        workspace_url = f"https://{workspace_url}"
+    # Ensure proper URL format
+    if not host.startswith('https://'):
+        host = f"https://{host}"
     
-    st.info(f"🔗 Connecting to: {workspace_url}")
-    st.info(f"📊 Using warehouse: {warehouse_id}")
+    st.info(f"🔗 Connecting to: {host}")
     
-    def query_table(table_name: str) -> pd.DataFrame:
-        """Query a table via SQL Statement Execution API with support for large results."""
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    try:
+        # Initialize Databricks SDK
+        config = Config(
+            host=host,
+            token=token
+        )
+        w = WorkspaceClient(config=config)
         
-        sql = f"SELECT * FROM {table_name}"
-        payload = {
-            "warehouse_id": warehouse_id,
-            "statement": sql,
-            "wait_timeout": "50s",
-            "disposition": "EXTERNAL_LINKS",  # Use external links for large results
-            "format": "JSON_ARRAY"  # Explicitly request JSON format
-        }
-        
-        try:
-            st.write(f"Querying {table_name}...")
-            resp = requests.post(
-                f"{workspace_url}/api/2.0/sql/statements/",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            
-            if resp.status_code != 200:
-                st.error(f"❌ API Error {resp.status_code}: {resp.text}")
-                st.stop()
-            
-            result = resp.json()
-            st_id = result["statement_id"]
-            status = result.get("status", {}).get("state")
-            
-            # Poll for completion
-            for _ in range(30):
-                if status == "SUCCEEDED":
-                    break
-                time.sleep(2)
-                status_resp = requests.get(
-                    f"{workspace_url}/api/2.0/sql/statements/{st_id}",
-                    headers=headers
+        def query_table(table_name: str) -> pd.DataFrame:
+            """Query table and return as DataFrame."""
+            with st.spinner(f"📊 Loading {table_name}..."):
+                # Execute query using SDK
+                result = w.statement_execution.execute_statement(
+                    warehouse_id=warehouse_id,
+                    statement=f"SELECT * FROM {table_name}",
+                    wait_timeout="2m"
                 )
-                if status_resp.status_code == 200:
-                    result = status_resp.json()
-                    status = result.get("status", {}).get("state")
-            
-            if status != "SUCCEEDED":
-                st.error(f"❌ Query failed with status: {status}")
-                st.json(result.get("status", {}))
-                st.stop()
-            
-            # Parse results - EXTERNAL_LINKS gives us download URLs
-            manifest = result.get("manifest", {})
-            columns = [c["name"] for c in manifest.get("schema", {}).get("columns", [])]
-            
-            all_rows = []
-            chunks = manifest.get("chunks", [])
-            
-            if not chunks:
-                # Empty result
-                df = pd.DataFrame(columns=columns)
-            else:
-                # Download chunks
-                for chunk_info in chunks:
-                    # EXTERNAL_LINKS provides external_links instead of inline data
-                    external_links = chunk_info.get("external_links")
-                    
-                    if external_links:
-                        # Download from external link
-                        for link in external_links:
-                            chunk_url = link.get("external_link")
-                            if chunk_url:
-                                chunk_resp = requests.get(chunk_url, timeout=30)
-                                if chunk_resp.status_code == 200:
-                                    chunk_data = chunk_resp.json()
-                                    for row in chunk_data.get("data_array", []):
-                                        all_rows.append(row)
-                    else:
-                        # Fallback to inline data (for small results)
-                        chunk_index = chunk_info.get("chunk_index", 0)
-                        chunk_resp = requests.get(
-                            f"{workspace_url}/api/2.0/sql/statements/{st_id}/result/chunks/{chunk_index}",
-                            headers=headers
-                        )
-                        if chunk_resp.status_code == 200:
-                            for row in chunk_resp.json().get("data_array", []):
-                                all_rows.append(row)
                 
-                df = pd.DataFrame(all_rows, columns=columns)
-            
-            st.success(f"✅ Loaded {len(df)} rows from {table_name}")
-            return df
-            
-        except Exception as e:
-            st.error(f"❌ Exception: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
-            st.stop()
-    
-    entities_df = query_table("research_catalog.healthcare.graphrag_entities")
-    relationships_df = query_table("research_catalog.healthcare.graphrag_relationships")
-    text_units_df = query_table("research_catalog.healthcare.graphrag_text_units")
-    
-    return entities_df, relationships_df, text_units_df
+                # Convert result to DataFrame
+                if result.result and result.result.data_array:
+                    columns = [col.name for col in result.manifest.schema.columns]
+                    rows = result.result.data_array
+                    df = pd.DataFrame(rows, columns=columns)
+                    st.success(f"✅ Loaded {len(df):,} rows from {table_name}")
+                    return df
+                else:
+                    st.warning(f"⚠️ No data returned from {table_name}")
+                    return pd.DataFrame()
+        
+        # Load all three tables
+        entities_df = query_table("research_catalog.healthcare.graphrag_entities")
+        relationships_df = query_table("research_catalog.healthcare.graphrag_relationships")
+        text_units_df = query_table("research_catalog.healthcare.graphrag_text_units")
+        
+        return entities_df, relationships_df, text_units_df
+        
+    except Exception as e:
+        st.error(f"❌ Failed to load data: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        st.stop()
+
 entities_df, relationships_df, text_units_df = load_graphrag_data()
 
 # ============================================================================

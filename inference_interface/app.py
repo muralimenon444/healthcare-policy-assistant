@@ -309,30 +309,113 @@ def get_dynamic_suggestions(current_results):
 
 @st.cache_data
 def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load parquet files from Databricks Unity Catalog Volumes."""
+    """Load data from Databricks Unity Catalog tables using SQL Statement Execution API."""
     import os
-    from databricks.sdk import WorkspaceClient
+    import requests
+    import time
     
-    # Authenticate with Databricks using Streamlit secrets
-    workspace_host = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST", ""))
-    token = st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN", ""))
+    # Get credentials from Streamlit secrets
+    workspace_url = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST"))
+    token = st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
+    warehouse_id = st.secrets.get("DATABRICKS_WAREHOUSE_ID", os.getenv("DATABRICKS_WAREHOUSE_ID", "e7ab584a1feb58ef"))
     
-    if not workspace_host or not token:
-        st.error("❌ Missing Databricks credentials in Streamlit secrets!")
+    if not workspace_url or not token:
+        st.error("⚠️ Databricks credentials missing!")
         st.stop()
     
-    # Initialize Databricks client for authentication
-    os.environ["DATABRICKS_HOST"] = workspace_host if workspace_host.startswith("https://") else f"https://{workspace_host}"
-    os.environ["DATABRICKS_TOKEN"] = token
+    # Ensure proper URL format
+    if not workspace_url.startswith('https://'):
+        workspace_url = f"https://{workspace_url}"
     
-    w = WorkspaceClient(host=os.environ["DATABRICKS_HOST"], token=token)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
     
-    # Now pandas can read from Unity Catalog Volumes
-    volume_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
+    def execute_sql_query(query: str) -> pd.DataFrame:
+        """Execute SQL query and return DataFrame."""
+        payload = {
+            "warehouse_id": warehouse_id,
+            "statement": query,
+            "wait_timeout": "50s"
+        }
+        
+        try:
+            response = requests.post(
+                f"{workspace_url}/api/2.0/sql/statements/",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            response.raise_for_status()
+        except Exception as e:
+            st.error(f"Query failed: {e}")
+            st.stop()
+        
+        result = response.json()
+        statement_id = result.get("statement_id")
+        status = result.get("status", {}).get("state")
+        
+        # Poll for completion
+        waited = 0
+        while status in ["PENDING", "RUNNING"] and waited < 60:
+            time.sleep(2)
+            waited += 2
+            try:
+                status_response = requests.get(
+                    f"{workspace_url}/api/2.0/sql/statements/{statement_id}",
+                    headers=headers,
+                    timeout=10
+                )
+                if status_response.status_code == 200:
+                    result = status_response.json()
+                    status = result.get("status", {}).get("state")
+            except:
+                break
+        
+        if status != "SUCCEEDED":
+            st.error(f"Query failed: {status}")
+            st.stop()
+        
+        # Get results
+        manifest = result.get("manifest", {})
+        schema_cols = manifest.get("schema", {}).get("columns", [])
+        columns = [col["name"] for col in schema_cols]
+        
+        # Handle chunked results
+        chunks = manifest.get("chunks", [])
+        if not chunks:
+            return pd.DataFrame(columns=columns)
+        
+        all_rows = []
+        for chunk_info in chunks:
+            chunk_index = chunk_info.get("chunk_index", 0)
+            try:
+                data_response = requests.get(
+                    f"{workspace_url}/api/2.0/sql/statements/{statement_id}/result/chunks/{chunk_index}",
+                    headers=headers,
+                    timeout=30
+                )
+                data_response.raise_for_status()
+                chunk_data = data_response.json()
+                
+                # Parse rows
+                for row_data in chunk_data.get("data_array", []):
+                    row = []
+                    for item in row_data.get("data_array", []):
+                        val = item.get("str_value") or item.get("int_value") or item.get("long_value")
+                        row.append(val)
+                    all_rows.append(row)
+            except:
+                continue
+        
+        return pd.DataFrame(all_rows, columns=columns)
     
-    entities_df = pd.read_parquet(f'{volume_path}/entities.parquet')
-    relationships_df = pd.read_parquet(f'{volume_path}/relationships.parquet')
-    text_units_df = pd.read_parquet(f'{volume_path}/text_units.parquet')
+    # Load tables
+    with st.spinner("📊 Loading GraphRAG data from Databricks..."):
+        entities_df = execute_sql_query("SELECT * FROM research_catalog.healthcare.graphrag_entities")
+        relationships_df = execute_sql_query("SELECT * FROM research_catalog.healthcare.graphrag_relationships")
+        text_units_df = execute_sql_query("SELECT * FROM research_catalog.healthcare.graphrag_text_units")
     
     return entities_df, relationships_df, text_units_df
 entities_df, relationships_df, text_units_df = load_graphrag_data()

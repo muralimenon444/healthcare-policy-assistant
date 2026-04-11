@@ -200,39 +200,15 @@ def initialize_openai_client():
 
 @st.cache_data
 def load_knowledge_graph():
-    """Load knowledge graph data from Unity Catalog tables."""
+    """Load knowledge graph data from Unity Catalog Volumes."""
     try:
-        # Use GraphRAG tables from Unity Catalog
-        from databricks.sdk import WorkspaceClient
-        w = WorkspaceClient()
+        # Direct path to GraphRAG output files in Unity Catalog Volumes
+        output_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
         
-        # Load from Unity Catalog tables using Databricks SQL
-        from databricks import sql
-        import os
-        
-        # Get connection details from workspace client
-        connection = sql.connect(
-            server_hostname=w.config.host.replace("https://", ""),
-            http_path="/sql/1.0/warehouses/" + os.environ.get("DATABRICKS_WAREHOUSE_ID", ""),
-            access_token=w.config.token
-        )
-        
-        cursor = connection.cursor()
-        
-        # Load entities
-        cursor.execute("SELECT * FROM research_catalog.healthcare.graphrag_entities")
-        entities_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
-        
-        # Load relationships
-        cursor.execute("SELECT * FROM research_catalog.healthcare.graphrag_relationships")
-        relationships_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
-        
-        # Load text units
-        cursor.execute("SELECT * FROM research_catalog.healthcare.graphrag_text_units")
-        text_units_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
-        
-        cursor.close()
-        connection.close()
+        # Load the parquet files
+        entities_df = pd.read_parquet(f"{output_path}/entities.parquet")
+        relationships_df = pd.read_parquet(f"{output_path}/relationships.parquet")
+        text_units_df = pd.read_parquet(f"{output_path}/text_units.parquet")
         
         return {
             "entities": entities_df,
@@ -241,23 +217,10 @@ def load_knowledge_graph():
             "text_column": "text" if "text" in text_units_df.columns else text_units_df.columns[0]
         }
     except Exception as e:
-        st.error(f"Error loading knowledge graph from Unity Catalog: {e}")
-        # Fallback to Volume-based loading
-        try:
-            output_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
-            entities_df = pd.read_parquet(f"{output_path}/entities.parquet")
-            relationships_df = pd.read_parquet(f"{output_path}/relationships.parquet")
-            text_units_df = pd.read_parquet(f"{output_path}/text_units.parquet")
-            
-            return {
-                "entities": entities_df,
-                "relationships": relationships_df,
-                "text_units": text_units_df,
-                "text_column": "text" if "text" in text_units_df.columns else text_units_df.columns[0]
-            }
-        except Exception as e2:
-            st.error(f"Fallback loading also failed: {e2}")
-            return None
+        st.error(f"Error loading knowledge graph: {e}")
+        st.error(f"Expected path: /Volumes/research_catalog/healthcare/policy_docs/output/")
+        st.info("Please ensure GraphRAG output files exist in the Volume.")
+        return None
 
 # ============================================================================
 # TEXT PROCESSING UTILITIES

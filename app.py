@@ -1,82 +1,27 @@
 """
-Regulatory Intelligence Engine - Databricks App
-A world-class GraphRAG-powered CMS Policy Intelligence System
+Healthcare Policy Assistant - Streamlit Cloud Production
+100% SQL-based data loading via Databricks SQL Warehouse
 Author: Murali (Engineering & Analytics Manager)
 """
 
 import streamlit as st
 import pandas as pd
-import os
 import re
 from openai import OpenAI
 from difflib import SequenceMatcher
 from typing import List, Tuple, Dict, Any
 import matplotlib
-matplotlib.use('Agg')  # Cloud-compatible backend
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import networkx as nx
 from collections import defaultdict
 from datetime import datetime, timedelta
-import hashlib
 import uuid
+from databricks import sql
 
 # ============================================================================
-# RATE LIMITING (Anti-Spam Protection)
+# CONFIGURATION
 # ============================================================================
-
-class RateLimiter:
-    def __init__(self, max_requests=10, time_window_minutes=5):
-        self.max_requests = max_requests
-        self.time_window = timedelta(minutes=time_window_minutes)
-        self.requests = defaultdict(list)
-    
-    def is_allowed(self, identifier):
-        """Check if request is allowed for this identifier (IP or session)."""
-        now = datetime.now()
-        
-        # Clean old requests
-        self.requests[identifier] = [
-            req_time for req_time in self.requests[identifier]
-            if now - req_time < self.time_window
-        ]
-        
-        # Check if under limit
-        if len(self.requests[identifier]) < self.max_requests:
-            self.requests[identifier].append(now)
-            return True
-        return False
-    
-    def get_remaining(self, identifier):
-        """Get remaining requests for this identifier."""
-        now = datetime.now()
-        recent = [
-            req_time for req_time in self.requests[identifier]
-            if now - req_time < self.time_window
-        ]
-        return max(0, self.max_requests - len(recent))
-
-# Initialize rate limiter
-rate_limiter = RateLimiter(max_requests=10, time_window_minutes=5)
-
-def get_client_id():
-    """Get a unique identifier for the client (session-based)."""
-    if 'client_id' not in st.session_state:
-        st.session_state.client_id = str(uuid.uuid4())
-    return st.session_state.client_id
-
-def check_rate_limit():
-    """Check if the current user is within rate limits."""
-    client_id = get_client_id()
-    
-    if not rate_limiter.is_allowed(client_id):
-        remaining_time = rate_limiter.time_window.total_seconds() / 60
-        st.error(f"🚫 Rate limit exceeded! Please wait {remaining_time:.0f} minutes before making more requests.")
-        st.stop()
-    
-    # Show remaining requests
-    remaining = rate_limiter.get_remaining(client_id)
-    if remaining <= 3:
-        st.caption(f"⚠️ {remaining} requests remaining in this 5-minute window")
 
 # Page configuration
 st.set_page_config(
@@ -86,10 +31,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Minimalist Gemini-style
+# Delta Table Names (Full Namespace)
+CATALOG = "research_catalog"
+SCHEMA = "healthcare"
+ENTITIES_TABLE = f"{CATALOG}.{SCHEMA}.graphrag_entities"
+RELATIONSHIPS_TABLE = f"{CATALOG}.{SCHEMA}.graphrag_relationships"
+TEXT_UNITS_TABLE = f"{CATALOG}.{SCHEMA}.graphrag_text_units"
+COMMON_QAS_TABLE = f"{CATALOG}.{SCHEMA}.graphrag_common_qas"
+
+# ============================================================================
+# CUSTOM CSS
+# ============================================================================
+
 st.markdown("""
 <style>
-    /* Gemini-style centered layout */
     .main-header {
         text-align: center;
         font-size: 3rem;
@@ -104,40 +59,6 @@ st.markdown("""
         color: #666;
         margin-bottom: 3rem;
     }
-    
-    /* Search box styling */
-    .stTextInput > div > div > input {
-        font-size: 1.1rem;
-        padding: 1rem;
-        border-radius: 24px;
-    }
-    
-    /* Guided Discovery Tiles */
-    .discovery-tile {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        cursor: pointer;
-        text-align: center;
-        transition: transform 0.2s;
-        margin: 0.5rem;
-    }
-    .discovery-tile:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-    }
-    .tile-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-    }
-    .tile-desc {
-        font-size: 0.9rem;
-        opacity: 0.9;
-    }
-    
-    /* Results tabs */
     .source-box {
         background-color: #f0f2f6;
         border-left: 4px solid #1f77b4;
@@ -157,9 +78,6 @@ st.markdown("""
     .entity-procedure { background-color: #f3e5f5; color: #7b1fa2; }
     .entity-organization { background-color: #e8f5e9; color: #388e3c; }
     .entity-condition { background-color: #fff3e0; color: #f57c00; }
-    .entity-demographic { background-color: #fce4ec; color: #c2185b; }
-    
-    /* Reasoning path styling */
     .reasoning-step {
         background-color: #f8f9fa;
         border-left: 4px solid #28a745;
@@ -167,104 +85,219 @@ st.markdown("""
         margin: 1rem 0;
         border-radius: 4px;
     }
-    .step-number {
-        font-weight: 700;
-        color: #28a745;
-        font-size: 1.1rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# CONFIGURATION & DATA LOADING
+# RATE LIMITING
+# ============================================================================
+
+class RateLimiter:
+    def __init__(self, max_requests=10, time_window_minutes=5):
+        self.max_requests = max_requests
+        self.time_window = timedelta(minutes=time_window_minutes)
+        self.requests = defaultdict(list)
+    
+    def is_allowed(self, identifier):
+        now = datetime.now()
+        self.requests[identifier] = [
+            req_time for req_time in self.requests[identifier]
+            if now - req_time < self.time_window
+        ]
+        if len(self.requests[identifier]) < self.max_requests:
+            self.requests[identifier].append(now)
+            return True
+        return False
+    
+    def get_remaining(self, identifier):
+        now = datetime.now()
+        recent = [
+            req_time for req_time in self.requests[identifier]
+            if now - req_time < self.time_window
+        ]
+        return max(0, self.max_requests - len(recent))
+
+rate_limiter = RateLimiter(max_requests=10, time_window_minutes=5)
+
+def get_client_id():
+    if 'client_id' not in st.session_state:
+        st.session_state.client_id = str(uuid.uuid4())
+    return st.session_state.client_id
+
+def check_rate_limit():
+    client_id = get_client_id()
+    if not rate_limiter.is_allowed(client_id):
+        remaining_time = rate_limiter.time_window.total_seconds() / 60
+        st.error(f"🚫 Rate limit exceeded! Please wait {remaining_time:.0f} minutes.")
+        st.stop()
+    remaining = rate_limiter.get_remaining(client_id)
+    if remaining <= 3:
+        st.caption(f"⚠️ {remaining} requests remaining")
+
+# ============================================================================
+# SQL WAREHOUSE CONNECTION (100% SQL-BASED)
 # ============================================================================
 
 @st.cache_resource
-def initialize_openai_client():
-    """Initialize OpenAI client for Databricks serving endpoints."""
+def get_databricks_connection():
+    """Create Databricks SQL Warehouse connection using st.secrets."""
     try:
-        from databricks.sdk import WorkspaceClient
+        # Get credentials from Streamlit secrets
+        host = st.secrets["DATABRICKS_HOST"]
+        token = st.secrets["DATABRICKS_TOKEN"]
+        warehouse_id = st.secrets["DATABRICKS_WAREHOUSE_ID"]
         
-        w = WorkspaceClient()
-        workspace_url = w.config.host.replace("https://", "")
-        token = w.config.token or w.config.authenticate()
-        
-        client = OpenAI(
-            api_key=token,
-            base_url=f"https://{workspace_url}/serving-endpoints"
+        # Create connection
+        connection = sql.connect(
+            server_hostname=host,
+            http_path=f"/sql/1.0/warehouses/{warehouse_id}",
+            access_token=token
         )
-        return client
-    except Exception as e:
-        st.error(f"Failed to initialize OpenAI client: {e}")
-        return None
-
-@st.cache_data
-def load_knowledge_graph():
-    """Load knowledge graph data from local data directory or Volume fallback."""
-    
-    # Try local data directory first (bundled with app)
-    local_path = os.path.join(os.path.dirname(__file__), "data")
-    volume_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
-    
-    # Determine which path to use
-    if os.path.exists(local_path) and os.path.exists(f"{local_path}/entities.parquet"):
-        data_path = local_path
-        st.info(f"📂 Loading data from bundled directory: {data_path}")
-    elif os.path.exists(volume_path):
-        data_path = volume_path
-        st.info(f"📂 Loading data from Volume: {data_path}")
-    else:
-        st.error("❌ Cannot find GraphRAG data files!")
-        st.error(f"Checked: {local_path}")
-        st.error(f"Checked: {volume_path}")
-        return None
-    
-    try:
-        # Load the parquet files
-        entities_df = pd.read_parquet(f"{data_path}/entities.parquet")
-        relationships_df = pd.read_parquet(f"{data_path}/relationships.parquet")
-        text_units_df = pd.read_parquet(f"{data_path}/text_units.parquet")
         
-        st.success(f"✅ Loaded {len(entities_df)} entities, {len(relationships_df)} relationships, {len(text_units_df)} text units")
+        return connection
+    except KeyError as e:
+        st.error(f"❌ Missing secret: {e}")
+        st.error("Please configure DATABRICKS_HOST, DATABRICKS_TOKEN, and DATABRICKS_WAREHOUSE_ID in Streamlit secrets.")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ Failed to connect to Databricks: {e}")
+        st.stop()
+
+def query_table(sql_query: str) -> pd.DataFrame:
+    """Execute SQL query and return DataFrame."""
+    try:
+        connection = get_databricks_connection()
+        cursor = connection.cursor()
+        cursor.execute(sql_query)
+        
+        # Fetch results
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(rows, columns=columns)
+        cursor.close()
+        
+        return df
+    except Exception as e:
+        st.error(f"❌ SQL query failed: {e}")
+        st.error(f"Query: {sql_query}")
+        return pd.DataFrame()
+
+# ============================================================================
+# DATA LOADING (100% SQL-BASED)
+# ============================================================================
+
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def load_entities():
+    """Load entities from Delta table via SQL."""
+    query = f"SELECT * FROM {ENTITIES_TABLE}"
+    df = query_table(query)
+    
+    if df.empty:
+        st.warning(f"⚠️ No entities found in {ENTITIES_TABLE}")
+    
+    return df
+
+@st.cache_data(ttl=3600)
+def load_relationships():
+    """Load relationships from Delta table via SQL."""
+    query = f"SELECT * FROM {RELATIONSHIPS_TABLE}"
+    df = query_table(query)
+    
+    if df.empty:
+        st.warning(f"⚠️ No relationships found in {RELATIONSHIPS_TABLE}")
+    
+    return df
+
+@st.cache_data(ttl=3600)
+def load_text_units():
+    """Load text units from Delta table via SQL."""
+    query = f"SELECT * FROM {TEXT_UNITS_TABLE}"
+    df = query_table(query)
+    
+    if df.empty:
+        st.warning(f"⚠️ No text units found in {TEXT_UNITS_TABLE}")
+    
+    return df
+
+@st.cache_data(ttl=3600)
+def load_common_qas():
+    """Load common Q&As from Delta table via SQL."""
+    try:
+        query = f"SELECT * FROM {COMMON_QAS_TABLE}"
+        df = query_table(query)
+        return df
+    except:
+        # Table might not exist yet
+        return pd.DataFrame()
+
+def load_all_data():
+    """Load all GraphRAG data from Delta tables."""
+    with st.spinner("📊 Loading knowledge graph from Databricks..."):
+        entities_df = load_entities()
+        relationships_df = load_relationships()
+        text_units_df = load_text_units()
+        qas_df = load_common_qas()
+        
+        if entities_df.empty or relationships_df.empty or text_units_df.empty:
+            st.error("❌ Failed to load required data from Databricks.")
+            st.error("Please ensure the following tables exist:")
+            st.error(f"  • {ENTITIES_TABLE}")
+            st.error(f"  • {RELATIONSHIPS_TABLE}")
+            st.error(f"  • {TEXT_UNITS_TABLE}")
+            st.stop()
+        
+        st.success(f"✅ Loaded {len(entities_df):,} entities, {len(relationships_df):,} relationships, {len(text_units_df):,} text units")
+        
+        # Determine text column
+        text_col = "text" if "text" in text_units_df.columns else text_units_df.columns[0]
         
         return {
             "entities": entities_df,
             "relationships": relationships_df,
             "text_units": text_units_df,
-            "text_column": "text" if "text" in text_units_df.columns else text_units_df.columns[0]
+            "qas": qas_df,
+            "text_column": text_col
         }
+
+# ============================================================================
+# OPENAI CLIENT (FOR LLM)
+# ============================================================================
+
+@st.cache_resource
+def initialize_openai_client():
+    """Initialize OpenAI client for Databricks Foundation Models."""
+    try:
+        host = st.secrets["DATABRICKS_HOST"]
+        token = st.secrets["DATABRICKS_TOKEN"]
+        
+        client = OpenAI(
+            api_key=token,
+            base_url=f"https://{host}/serving-endpoints"
+        )
+        return client
     except Exception as e:
-        st.error(f"Error loading knowledge graph: {e}")
+        st.error(f"Failed to initialize LLM client: {e}")
         return None
 
 # ============================================================================
-# TEXT PROCESSING UTILITIES
+# TEXT PROCESSING
 # ============================================================================
 
 def normalize_text(text: str) -> str:
-    """Normalize text for better matching."""
     text = text.lower()
     text = re.sub(r'[-_/]', ' ', text)
     text = re.sub(r'[^\w\s]', ' ', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-def highlight_keywords(text: str, keywords: List[str]) -> str:
-    """Highlight keywords in text (case-insensitive)."""
-    for keyword in keywords:
-        pattern = re.compile(re.escape(keyword), re.IGNORECASE)
-        text = pattern.sub(f"**{keyword}**", text)
-    return text
-
 # ============================================================================
 # SEARCH FUNCTIONS
 # ============================================================================
 
 def search_text_chunks(query: str, kg_data: Dict, top_k: int = 5) -> List[Dict[str, Any]]:
-    """Direct search: Find relevant text chunks using keyword matching."""
-    if kg_data is None:
-        return []
-    
+    """Find relevant text chunks using keyword matching."""
     text_units_df = kg_data["text_units"]
     text_col = kg_data["text_column"]
     
@@ -279,11 +312,11 @@ def search_text_chunks(query: str, kg_data: Dict, top_k: int = 5) -> List[Dict[s
         chunk_normalized = normalize_text(chunk_text)
         chunk_words = set(chunk_normalized.split())
         
-        # Scoring: word overlap + exact phrase match bonus
+        # Word overlap scoring
         overlap = len(query_words & chunk_words)
         score = overlap / max(len(query_words), 1)
         
-        # Bonus for exact phrase match
+        # Exact phrase bonus
         if query_lower in chunk_text.lower():
             score += 0.5
         
@@ -296,15 +329,11 @@ def search_text_chunks(query: str, kg_data: Dict, top_k: int = 5) -> List[Dict[s
                 "source_manual": row.get("source_manual", "Unknown Manual")
             })
     
-    # Sort by score and return top_k
     results.sort(key=lambda x: x["score"], reverse=True)
     return results[:top_k]
 
 def find_entities_in_query(query: str, kg_data: Dict, threshold: float = 0.3) -> List[Tuple[str, str, float]]:
-    """Find entities mentioned in the query using fuzzy matching."""
-    if kg_data is None:
-        return []
-    
+    """Find entities mentioned in query."""
     entities_df = kg_data["entities"]
     query_lower = query.lower()
     query_normalized = normalize_text(query)
@@ -318,24 +347,19 @@ def find_entities_in_query(query: str, kg_data: Dict, threshold: float = 0.3) ->
         entity_normalized = normalize_text(entity_text)
         entity_words = set(entity_normalized.split())
         
-        # 1. Exact substring match
+        # Exact match
         if entity_lower in query_lower or query_lower in entity_lower:
             matches.append((entity_text, entity['type'], 1.0))
             continue
         
-        # 2. Normalized substring match
-        if entity_normalized in query_normalized or query_normalized in entity_normalized:
-            matches.append((entity_text, entity['type'], 0.95))
-            continue
-        
-        # 3. Word overlap match
+        # Word overlap
         overlap = len(entity_words & query_words)
         if overlap > 0:
             score = overlap / max(len(entity_words), len(query_words))
             if score >= threshold:
                 matches.append((entity_text, entity['type'], score))
     
-    # Remove duplicates and sort by score
+    # Deduplicate
     seen = set()
     unique_matches = []
     for match in matches:
@@ -347,10 +371,7 @@ def find_entities_in_query(query: str, kg_data: Dict, threshold: float = 0.3) ->
     return unique_matches[:10]
 
 def find_relationships(entity_names: List[str], kg_data: Dict) -> List[Dict[str, Any]]:
-    """Find relationships involving the given entities."""
-    if kg_data is None:
-        return []
-    
+    """Find relationships involving given entities."""
     relationships_df = kg_data["relationships"]
     entity_names_lower = [e.lower() for e in entity_names]
     
@@ -365,23 +386,22 @@ def find_relationships(entity_names: List[str], kg_data: Dict) -> List[Dict[str,
                     "source": rel['source'],
                     "target": rel['target'],
                     "relation": rel['relation'],
-                    "chunk_id": rel['chunk_id']
+                    "chunk_id": rel.get('chunk_id', None)
                 })
                 break
     
     return relevant_rels
 
 def get_chunks_from_relationships(relationships: List[Dict], kg_data: Dict) -> List[Dict[str, Any]]:
-    """Get text chunks that contain the relationships."""
-    if not relationships or kg_data is None:
+    """Get text chunks containing relationships."""
+    if not relationships:
         return []
     
     text_units_df = kg_data["text_units"]
     text_col = kg_data["text_column"]
+    chunk_ids = set(rel['chunk_id'] for rel in relationships if rel.get('chunk_id') is not None)
     
-    chunk_ids = set(rel['chunk_id'] for rel in relationships if 'chunk_id' in rel)
     chunks = []
-    
     for chunk_id in chunk_ids:
         if chunk_id < len(text_units_df):
             row = text_units_df.iloc[chunk_id]
@@ -389,7 +409,7 @@ def get_chunks_from_relationships(relationships: List[Dict], kg_data: Dict) -> L
                 "chunk_id": chunk_id,
                 "text": str(row[text_col]),
                 "document_id": row.get("document_id", "unknown"),
-                "source_manual": row.get("source_manual", "Unknown Manual")
+                "source_manual": row.get("source_manual", "Unknown")
             })
     
     return chunks
@@ -398,15 +418,16 @@ def get_chunks_from_relationships(relationships: List[Dict], kg_data: Dict) -> L
 # LLM ANSWER GENERATION
 # ============================================================================
 
-def generate_answer_with_citations(query: str, chunks: List[Dict], entities: List[Tuple], relationships: List[Dict], client: OpenAI) -> Tuple[str, str]:
-    """Generate answer with citations and reasoning path."""
+def generate_answer_with_citations(query: str, chunks: List[Dict], entities: List[Tuple], 
+                                   relationships: List[Dict], client: OpenAI) -> Tuple[str, str]:
+    """Generate answer using LLM with citations."""
     if not chunks:
-        return "No relevant information found in the policy documents.", "No analysis path available."
+        return "No relevant information found in policy documents.", "No analysis available."
     
     # Build context
     context_parts = ["RELEVANT POLICY EXCERPTS:\n"]
     for i, chunk in enumerate(chunks[:3], 1):
-        context_parts.append(f"[Source {i}] (from {chunk.get('source_manual', 'Unknown')})\n{chunk['text'][:800]}\n")
+        context_parts.append(f"[Source {i}] ({chunk.get('source_manual', 'Unknown')})\n{chunk['text'][:800]}\n")
     
     if relationships:
         context_parts.append("\nKNOWLEDGE GRAPH RELATIONSHIPS:\n")
@@ -415,12 +436,11 @@ def generate_answer_with_citations(query: str, chunks: List[Dict], entities: Lis
     
     context = "\n".join(context_parts)
     
-    system_prompt = """You are a Medicare coverage policy expert assistant.
-Answer questions accurately using the provided policy excerpts and relationships.
-IMPORTANT: When citing sources, use **bold** format like **[Source 1]** or **[Source 2]**.
-Be specific and reference the exact source number for each claim."""
+    system_prompt = """You are a Medicare policy expert assistant.
+Answer questions using provided policy excerpts and relationships.
+Use **[Source N]** format for citations."""
     
-    user_prompt = f"""Context:\n{context}\n\nQuestion: {query}\n\nProvide a clear answer with **bolded citations** like **[Source 1]**."""
+    user_prompt = f"""Context:\n{context}\n\nQuestion: {query}\n\nProvide a clear answer with **bolded citations**."""
     
     try:
         response = client.chat.completions.create(
@@ -434,43 +454,36 @@ Be specific and reference the exact source number for each claim."""
         )
         answer = response.choices[0].message.content
         
-        # Generate reasoning path
-        reasoning_path = generate_reasoning_path(query, entities, relationships, chunks)
+        # Generate reasoning
+        reasoning = generate_reasoning_path(query, entities, relationships, chunks)
         
-        return answer, reasoning_path
+        return answer, reasoning
     except Exception as e:
-        return f"Error generating answer: {e}", "Error generating reasoning path."
+        return f"Error generating answer: {e}", "Error in analysis."
 
 def generate_reasoning_path(query: str, entities: List[Tuple], relationships: List[Dict], chunks: List[Dict]) -> str:
-    """Generate a 3-step analysis path narrated by the AI."""
+    """Generate 3-step reasoning path."""
     steps = []
     
-    # Step 1: Entity Detection
     if entities:
         entity_names = [e[0] for e in entities[:3]]
         steps.append(f"**Step 1: Entity Detection**\n"
-                    f"I identified key entities in your query: {', '.join(entity_names)}. "
-                    f"These entities help me understand what you're looking for in the policy documents.")
+                    f"Identified: {', '.join(entity_names)}.")
     else:
-        steps.append(f"**Step 1: Keyword Analysis**\n"
-                    f"I analyzed your query for relevant keywords and concepts to search the policy documents.")
+        steps.append("**Step 1: Keyword Analysis**\n"
+                    "Analyzed query for relevant keywords.")
     
-    # Step 2: Graph Traversal
     if relationships:
-        rel_count = len(relationships)
         steps.append(f"**Step 2: Relationship Exploration**\n"
-                    f"I traversed the knowledge graph and found {rel_count} relationships connecting these entities. "
-                    f"For example: {relationships[0]['source']} → {relationships[0]['relation']} → {relationships[0]['target']}")
+                    f"Found {len(relationships)} relationships. "
+                    f"Example: {relationships[0]['source']} → {relationships[0]['relation']} → {relationships[0]['target']}")
     else:
-        steps.append(f"**Step 2: Document Search**\n"
-                    f"I searched through the policy documents to find relevant text passages matching your query.")
+        steps.append("**Step 2: Document Search**\n"
+                    "Searched policy documents for passages.")
     
-    # Step 3: Evidence Synthesis
-    chunk_count = len(chunks)
     source_manuals = set(c.get('source_manual', 'Unknown') for c in chunks)
     steps.append(f"**Step 3: Evidence Synthesis**\n"
-                f"I found {chunk_count} relevant text passages from {len(source_manuals)} source manual(s): "
-                f"{', '.join(list(source_manuals)[:3])}. I synthesized this information to provide your answer.")
+                f"Found {len(chunks)} passages from {len(source_manuals)} manual(s).")
     
     return "\n\n".join(steps)
 
@@ -479,58 +492,35 @@ def generate_reasoning_path(query: str, entities: List[Tuple], relationships: Li
 # ============================================================================
 
 def create_knowledge_graph_viz(entities: List[Tuple], relationships: List[Dict]) -> plt.Figure:
-    """Create NetworkX graph visualization with color-coding by source."""
+    """Create NetworkX graph visualization."""
     G = nx.Graph()
     
-    # Color mapping by entity type
     color_map = {
         'policy': '#1976d2',
         'procedure': '#7b1fa2',
         'organization': '#388e3c',
         'condition': '#f57c00',
-        'demographic': '#c2185b',
         'default': '#666666'
     }
     
-    # Add nodes
     entity_colors = {}
     for entity_text, entity_type, score in entities:
         G.add_node(entity_text)
         entity_colors[entity_text] = color_map.get(entity_type.lower(), color_map['default'])
     
-    # Add edges
-    for rel in relationships[:20]:  # Limit to 20 relationships for clarity
+    for rel in relationships[:20]:
         if rel['source'] in G.nodes and rel['target'] in G.nodes:
-            G.add_edge(rel['source'], rel['target'], label=rel['relation'])
+            G.add_edge(rel['source'], rel['target'])
     
-    # Create figure
     fig, ax = plt.subplots(figsize=(12, 8))
     pos = nx.spring_layout(G, k=0.5, iterations=50)
     
-    # Draw nodes
     node_colors = [entity_colors.get(node, color_map['default']) for node in G.nodes()]
-    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=1000, alpha=0.9, ax=ax)
-    
-    # Draw edges
+    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=1200, alpha=0.9, ax=ax)
     nx.draw_networkx_edges(G, pos, width=2, alpha=0.5, edge_color='#999', ax=ax)
+    nx.draw_networkx_labels(G, pos, font_size=9, font_weight='bold', ax=ax)
     
-    # Draw labels
-    nx.draw_networkx_labels(G, pos, font_size=8, font_weight='bold', ax=ax)
-    
-    # Add legend
-    legend_elements = [
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color_map['policy'], 
-                   markersize=10, label='Policy'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color_map['procedure'], 
-                   markersize=10, label='Procedure'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color_map['organization'], 
-                   markersize=10, label='Organization'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color_map['condition'], 
-                   markersize=10, label='Condition'),
-    ]
-    ax.legend(handles=legend_elements, loc='upper left')
-    
-    ax.set_title("Knowledge Graph Visualization", fontsize=16, fontweight='bold')
+    ax.set_title("Knowledge Graph: Entity Relationships", fontsize=16, fontweight='bold')
     ax.axis('off')
     plt.tight_layout()
     
@@ -546,60 +536,38 @@ def main():
         st.session_state.search_query = ""
     if 'show_results' not in st.session_state:
         st.session_state.show_results = False
-    if 'last_results' not in st.session_state:
-        st.session_state.last_results = None
     
-    # Initialize client and data
+    # Load data and clients
+    kg_data = load_all_data()
     client = initialize_openai_client()
-    kg_data = load_knowledge_graph()
     
-    if client is None or kg_data is None:
-        st.error("Failed to initialize application. Check configuration and data paths.")
-        return
+    if client is None:
+        st.error("Failed to initialize LLM client.")
+        st.stop()
     
-    # ============================================================================
-    # SIDEBAR: System Architecture & Insights
-    # ============================================================================
+    # ========================================================================
+    # SIDEBAR
+    # ========================================================================
     
     with st.sidebar:
-        # System Architecture & Author
-        with st.expander("🛠️ System Architecture & Author", expanded=False):
-            st.markdown("**Author:**")
-            st.write("Murali (Engineering & Analytics Manager)")
-            
-            st.markdown("**Backend Stack:**")
-            st.write("• Databricks Mosaic AI")
-            st.write("• GraphRAG (Knowledge Graph)")
-            st.write("• Llama 3.3 70B")
-            st.write("• Unity Catalog")
-            
-            st.markdown("**Frontend Stack:**")
-            st.write("• Streamlit")
-            st.write("• NetworkX (Graph Visualization)")
-            st.write("• Matplotlib")
+        with st.expander("🛠️ System Architecture", expanded=False):
+            st.markdown("**Author:** Murali")
+            st.markdown("**Backend:** Databricks + GraphRAG")
+            st.markdown("**Frontend:** Streamlit Cloud")
         
-        # System Insights
-        with st.expander("📊 System Insights", expanded=False):
+        with st.expander("📊 System Metrics", expanded=False):
             st.metric("Entities", len(kg_data["entities"]))
             st.metric("Relationships", len(kg_data["relationships"]))
             st.metric("Text Chunks", len(kg_data["text_units"]))
-            
-            # Additional stats
-            entity_types = kg_data["entities"]['type'].value_counts()
-            st.markdown("**Entity Distribution:**")
-            for etype, count in entity_types.head(5).items():
-                st.write(f"• {etype}: {count}")
     
-    # ============================================================================
-    # MINIMALIST LANDING PAGE (Gemini-style)
-    # ============================================================================
+    # ========================================================================
+    # LANDING PAGE
+    # ========================================================================
     
     if not st.session_state.show_results:
-        # Centered header
         st.markdown('<div class="main-header">🧠 Regulatory Intelligence Engine</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">GraphRAG-powered CMS Medicare Policy Intelligence</div>', unsafe_allow_html=True)
         
-        # Centered search
         col1, col2, col3 = st.columns([1, 3, 1])
         with col2:
             query = st.text_input(
@@ -612,20 +580,19 @@ def main():
             
             search_clicked = st.button("🔍 Search", type="primary", use_container_width=True)
         
-        # Guided Discovery Tiles
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("### 🎯 Guided Discovery for CMS Analysts")
+        # Guided Discovery
+        st.markdown("### 🎯 Guided Discovery")
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            if st.button("📋 Policy Retrieval", use_container_width=True):
+            if st.button("📋 Coverage Policies", use_container_width=True):
                 st.session_state.search_query = "What are the coverage requirements for preventive screening services?"
                 st.session_state.show_results = True
                 st.rerun()
         
         with col2:
-            if st.button("🔗 Relationship Mapping", use_container_width=True):
+            if st.button("🔗 Policy Relations", use_container_width=True):
                 st.session_state.search_query = "How are NCDs and local coverage determinations related?"
                 st.session_state.show_results = True
                 st.rerun()
@@ -637,126 +604,90 @@ def main():
                 st.rerun()
         
         with col4:
-            if st.button("📊 2026 Policy Deltas", use_container_width=True):
+            if st.button("📊 2026 Updates", use_container_width=True):
                 st.session_state.search_query = "What policy changes are effective in 2026?"
                 st.session_state.show_results = True
                 st.rerun()
         
-        # Trigger search if button clicked
         if search_clicked and query:
             st.session_state.search_query = query
             st.session_state.show_results = True
             st.rerun()
     
-    # ============================================================================
-    # DETAILED RESULTS VIEW (Multi-Tab from v2.9)
-    # ============================================================================
+    # ========================================================================
+    # RESULTS VIEW
+    # ========================================================================
     
     else:
         query = st.session_state.search_query
         
-        # Header with back button
         col1, col2, col3 = st.columns([1, 3, 1])
         with col1:
-            if st.button("← Back to Search"):
+            if st.button("← Back"):
                 st.session_state.show_results = False
                 st.rerun()
         with col2:
             st.markdown(f"### 🔍 Results for: *{query}*")
         
-        # Rate limiting check
         check_rate_limit()
         
-        # Perform search
-        with st.spinner("Analyzing your question..."):
-            # Direct search
+        with st.spinner("Analyzing..."):
             chunks = search_text_chunks(query, kg_data, top_k=5)
-            
-            # Graph search
             entities = find_entities_in_query(query, kg_data, threshold=0.3)
             entity_names = [e[0] for e in entities]
             relationships = find_relationships(entity_names, kg_data)
             
-            # Get additional chunks from relationships
             if relationships:
                 rel_chunks = get_chunks_from_relationships(relationships, kg_data)
-                # Merge and deduplicate
                 all_chunk_ids = set(c['chunk_id'] for c in chunks)
                 for rc in rel_chunks:
                     if rc['chunk_id'] not in all_chunk_ids:
                         chunks.append(rc)
-                        all_chunk_ids.add(rc['chunk_id'])
             
-            # Generate answer
-            answer, reasoning_path = generate_answer_with_citations(query, chunks, entities, relationships, client)
-            
-            # Store results
-            st.session_state.last_results = {
-                'answer': answer,
-                'reasoning_path': reasoning_path,
-                'entities': entities,
-                'relationships': relationships,
-                'chunks': chunks
-            }
+            answer, reasoning = generate_answer_with_citations(query, chunks, entities, relationships, client)
         
-        # ============================================================================
-        # MULTI-TAB RESULTS DISPLAY
-        # ============================================================================
+        tab1, tab2, tab3, tab4 = st.tabs(["📝 Analysis", "🧭 Reasoning", "🕸️ Graph", "📚 Evidence"])
         
-        tab1, tab2, tab3, tab4 = st.tabs(["📝 Analysis", "🧭 Reasoning Path", "🕸️ Knowledge Graph", "📚 Evidence"])
-        
-        # TAB 1: Analysis with bolded citations
         with tab1:
             st.markdown("### 💡 Analysis")
             st.markdown(answer)
         
-        # TAB 2: Reasoning Path (NEW)
         with tab2:
             st.markdown("### 🧭 Analysis Path")
-            st.markdown("*The AI explains how it traversed the knowledge graph to answer your question*")
-            st.markdown(reasoning_path)
+            st.markdown(reasoning)
         
-        # TAB 3: Knowledge Graph Visualization
         with tab3:
-            st.markdown("### 🕸️ Knowledge Graph Visualization")
-            
+            st.markdown("### 🕸️ Knowledge Graph")
             if entities and relationships:
                 try:
                     fig = create_knowledge_graph_viz(entities, relationships)
                     st.pyplot(fig)
-                    plt.close(fig)  # Clean up
+                    plt.close(fig)
                 except Exception as e:
-                    st.error(f"Error creating graph visualization: {e}")
+                    st.error(f"Visualization error: {e}")
             else:
-                st.info("No graph relationships found for visualization. Try a query with more specific entities.")
+                st.info("No graph relationships found.")
         
-        # TAB 4: Evidence Tables
         with tab4:
             st.markdown("### 📚 Evidence")
-            
-            # Entities table
             if entities:
-                st.markdown("**🎯 Entities Detected**")
+                st.markdown("**Entities**")
                 entity_df = pd.DataFrame(entities, columns=['Entity', 'Type', 'Confidence'])
                 st.dataframe(entity_df, use_container_width=True)
             
-            # Relationships table
             if relationships:
-                st.markdown("**🔗 Relationships**")
+                st.markdown("**Relationships**")
                 rel_df = pd.DataFrame(relationships)
                 st.dataframe(rel_df[['source', 'relation', 'target']], use_container_width=True)
             
-            # Text units table
             if chunks:
-                st.markdown("**📄 Text Units**")
+                st.markdown("**Text Units**")
                 chunk_data = [{
                     'Chunk ID': c['chunk_id'],
-                    'Source Manual': c.get('source_manual', 'Unknown'),
-                    'Document ID': c.get('document_id', 'Unknown'),
+                    'Source': c.get('source_manual', 'Unknown'),
                     'Preview': c['text'][:150] + '...'
                 } for c in chunks[:10]]
-                chunk_df = pd.DataFrame(chunk_data)
-                st.dataframe(chunk_df, use_container_width=True)
+                st.dataframe(pd.DataFrame(chunk_data), use_container_width=True)
 
 if __name__ == "__main__":
     main()

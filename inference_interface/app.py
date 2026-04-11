@@ -1,7 +1,7 @@
-# v3.2 - MINIMALIST GEMINI AESTHETIC
+# v3.3 - MINIMALIST GEMINI AESTHETIC
 """
 Last Updated: 2026-04-10 21:00:00
-Version: v3.2 - Minimalist Gemini Design
+Version: v3.3 - Minimalist Gemini Design
 Murali's Medicare Policy Assistant - GraphRAG Demo
 Clean, focused interface with chat-first design
 """
@@ -271,60 +271,107 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.D
 def query_databricks_for_answer(question: str, entities_df: pd.DataFrame, relationships_df: pd.DataFrame) -> Dict[str, Any]:
     """
     Query the knowledge graph for answers to questions not in common Q&As.
-    Uses simple entity matching and relationship traversal.
+    ROBUST VERSION with proper error handling and column detection.
     """
-    
-    # Extract potential entities from the question
-    question_lower = question.lower()
-    
-    # Find matching entities (case-insensitive partial match)
-    matching_entities = entities_df[
-        entities_df['name'].str.lower().str.contains('|'.join(question_lower.split()), na=False, regex=True)
-    ].head(10)
-    
-    if len(matching_entities) == 0:
+    try:
+        # Detect entity name column (could be 'name', 'title', 'entity', etc.)
+        entity_col = None
+        for col in ['name', 'title', 'entity', 'entity_name']:
+            if col in entities_df.columns:
+                entity_col = col
+                break
+        
+        if not entity_col:
+            return {
+                'answer': "⚠️ Knowledge graph structure issue. Please check the data.",
+                'entities': [],
+                'related_questions': []
+            }
+        
+        # Extract potential entities from the question
+        question_lower = question.lower()
+        words = [w for w in question_lower.split() if len(w) > 3]  # Filter short words
+        
+        if not words:
+            return {
+                'answer': "Please provide a more detailed question.",
+                'entities': [],
+                'related_questions': []
+            }
+        
+        # Find matching entities (case-insensitive partial match)
+        pattern = '|'.join(words)
+        matching_entities = entities_df[
+            entities_df[entity_col].fillna('').str.lower().str.contains(pattern, na=False, regex=True, case=False)
+        ].head(10)
+        
+        if len(matching_entities) == 0:
+            return {
+                'answer': "I couldn't find specific information about this in the knowledge graph. Try asking about:\n\n• Medicare coverage\n• Screening procedures\n• Medical services\n• Specific conditions (diabetes, cancer, etc.)",
+                'entities': [],
+                'related_questions': [
+                    "What screening services are covered by Medicare?",
+                    "What are the requirements for lung cancer screening?",
+                    "Is diabetes screening covered?"
+                ]
+            }
+        
+        # Get entity names
+        entity_names = matching_entities[entity_col].tolist()
+        
+        # Detect relationship columns
+        rel_source_col = 'source' if 'source' in relationships_df.columns else 'src'
+        rel_target_col = 'target' if 'target' in relationships_df.columns else 'dst'
+        
+        # Find relationships involving these entities
+        related_rels = relationships_df[
+            relationships_df[rel_source_col].isin(entity_names) | 
+            relationships_df[rel_target_col].isin(entity_names)
+        ].head(20)
+        
+        # Build answer from descriptions
+        answer_parts = []
+        
+        # Add entity descriptions
+        desc_col = 'description' if 'description' in matching_entities.columns else 'desc'
+        if desc_col in matching_entities.columns:
+            for _, entity in matching_entities.head(3).iterrows():
+                desc = entity.get(desc_col)
+                if pd.notna(desc) and desc and len(str(desc)) > 10:
+                    answer_parts.append(f"**{entity[entity_col]}**: {desc}")
+        
+        # Add relationship context
+        if len(related_rels) > 0:
+            answer_parts.append("\n**Related Information:**")
+            rel_desc_col = 'description' if 'description' in related_rels.columns else 'type'
+            for _, rel in related_rels.head(5).iterrows():
+                desc = rel.get(rel_desc_col, 'relates to')
+                answer_parts.append(f"• {rel[rel_source_col]} → {desc} → {rel[rel_target_col]}")
+        
+        final_answer = "\n\n".join(answer_parts) if answer_parts else "Information found, but details are limited. The knowledge graph contains references to these topics, but detailed descriptions are not available."
+        
+        # Generate related questions based on entities
+        related_questions = []
+        for entity in entity_names[:3]:
+            related_questions.append(f"What are the requirements for {entity}?")
+            related_questions.append(f"How is {entity} covered under Medicare?")
+        
         return {
-            'answer': "I couldn't find specific information about this in the knowledge graph. Try rephrasing your question or ask about Medicare coverage, screening procedures, or specific medical services.",
-            'entities': [],
-            'related_questions': []
+            'answer': final_answer,
+            'entities': entity_names[:5],
+            'related_questions': related_questions[:6]
         }
     
-    # Get entity names
-    entity_names = matching_entities['name'].tolist()
-    
-    # Find relationships involving these entities
-    related_rels = relationships_df[
-        relationships_df['source'].isin(entity_names) | 
-        relationships_df['target'].isin(entity_names)
-    ].head(20)
-    
-    # Build answer from descriptions
-    answer_parts = []
-    
-    # Add entity descriptions
-    for _, entity in matching_entities.head(3).iterrows():
-        if pd.notna(entity.get('description')) and entity['description']:
-            answer_parts.append(f"**{entity['name']}**: {entity['description']}")
-    
-    # Add relationship context
-    if len(related_rels) > 0:
-        answer_parts.append("\n**Related Information:**")
-        for _, rel in related_rels.head(5).iterrows():
-            answer_parts.append(f"• {rel['source']} {rel.get('description', 'relates to')} {rel['target']}")
-    
-    final_answer = "\n\n".join(answer_parts) if answer_parts else "Information found, but details are limited. Please check the official Medicare documentation."
-    
-    # Generate related questions based on entities
-    related_questions = []
-    for entity in entity_names[:3]:
-        related_questions.append(f"What are the requirements for {entity}?")
-        related_questions.append(f"How is {entity} covered under Medicare?")
-    
-    return {
-        'answer': final_answer,
-        'entities': entity_names[:5],
-        'related_questions': related_questions[:6]
-    }
+    except Exception as e:
+        # Catch-all error handler
+        return {
+            'answer': f"⚠️ An error occurred while searching: {str(e)}\n\nPlease try rephrasing your question.",
+            'entities': [],
+            'related_questions': [
+                "What screening services are covered by Medicare?",
+                "What are the requirements for lung cancer screening?"
+            ]
+        }
 
 with st.spinner("Loading..."):
     entities_df, relationships_df, text_units_df, common_qas_df, stats_df = load_graphrag_data()
@@ -371,22 +418,8 @@ with st.sidebar:
 st.markdown('<h1 class="main-header">Medicare Policy Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Ask anything about Medicare coverage, policies, and procedures</p>', unsafe_allow_html=True)
 
-# Chat Input
-query = st.text_input(
-    "Your question",
-    placeholder="e.g., What are the requirements for lung cancer screening?",
-    label_visibility="collapsed",
-    key="main_query_input"
-)
-
-# Search button (centered)
-col1, col2, col3 = st.columns([1, 1, 1])
-with col2:
-    search_clicked = st.button("🔍 Search", use_container_width=True, type="primary")
-
-# Quick Start Cards
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown('<p style="color: #9CA3AF; text-align: center; margin-bottom: 1rem;">Quick Start</p>', unsafe_allow_html=True)
+# Quick Start Cards First (so they're not affected by form)
+st.markdown('<p style="color: #9CA3AF; text-align: center; margin-bottom: 1rem; margin-top: 2rem;">Quick Start</p>', unsafe_allow_html=True)
 
 # Get 3 sample Q&As for quick start cards
 if len(common_qas_df) >= 3:
@@ -396,15 +429,35 @@ if len(common_qas_df) >= 3:
         # Create card as a clickable button with question text
         col1, col2, col3 = st.columns([0.05, 1, 0.05])
         with col2:
+            # Use index-based key for stability
             if st.button(
                 row['question'],
-                key=f"qcard_{idx}",
-                use_container_width=True
+                key=f"quickstart_card_{idx}",
+                use_container_width=True,
+                help="Click to ask this question"
             ):
                 st.session_state.query = row['question']
                 st.rerun()
         
         st.markdown("<div style='margin-bottom: 0.75rem;'></div>", unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Chat Input with Form (supports Enter key)
+with st.form(key="search_form", clear_on_submit=False):
+    query = st.text_input(
+        "Your question",
+        placeholder="e.g., What are the requirements for lung cancer screening?",
+        label_visibility="collapsed",
+        value=st.session_state.get('query', '')  # Use .get() for safety
+    )
+    
+    # Search button (centered)
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        search_clicked = st.form_submit_button("🔍 Search", use_container_width=True, type="primary")
 
 # ============================================================================
 # RESULTS DISPLAY (if search clicked)
@@ -455,4 +508,4 @@ if search_clicked and query:
 # ============================================================================
 
 st.markdown("<br><br>", unsafe_allow_html=True)
-st.caption(f"Powered by Microsoft GraphRAG • Databricks Unity Catalog • v3.2")
+st.caption(f"Powered by Microsoft GraphRAG • Databricks Unity Catalog • v3.3")

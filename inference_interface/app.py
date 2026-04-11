@@ -322,26 +322,25 @@ with col2:
 
 # Quick Start Cards
 st.markdown("<br>", unsafe_allow_html=True)
+st.markdown('<p style="color: #9CA3AF; text-align: center; margin-bottom: 1rem;">Quick Start</p>', unsafe_allow_html=True)
 
 # Get 3 sample Q&As for quick start cards
 if len(common_qas_df) >= 3:
     sample_qas = common_qas_df.sample(n=3, random_state=42)
     
     for idx, row in sample_qas.iterrows():
-        card_html = f"""
-        <div class="quick-card">
-            <div class="quick-card-title">{row['question']}</div>
-            <div class="quick-card-desc">Click to see the answer</div>
-        </div>
-        """
+        # Create card as a clickable button with question text
+        col1, col2, col3 = st.columns([0.05, 1, 0.05])
+        with col2:
+            if st.button(
+                row['question'],
+                key=f"qcard_{idx}",
+                use_container_width=True
+            ):
+                st.session_state.query = row['question']
+                st.rerun()
         
-        if st.button(f"card_{idx}", key=f"qcard_{idx}", use_container_width=True, label_visibility="collapsed"):
-            st.session_state.query = row['question']
-            st.rerun()
-        
-        # Render card HTML above button (hack to make it look clickable)
-        st.markdown(card_html, unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-bottom: 0.75rem;'></div>", unsafe_allow_html=True)
 
 # ============================================================================
 # RESULTS DISPLAY (if search clicked)

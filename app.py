@@ -206,10 +206,33 @@ def load_knowledge_graph():
         from databricks.sdk import WorkspaceClient
         w = WorkspaceClient()
         
-        # Load from Unity Catalog tables
-        entities_df = spark.table("research_catalog.healthcare.graphrag_entities").toPandas()
-        relationships_df = spark.table("research_catalog.healthcare.graphrag_relationships").toPandas()
-        text_units_df = spark.table("research_catalog.healthcare.graphrag_text_units").toPandas()
+        # Load from Unity Catalog tables using Databricks SQL
+        from databricks import sql
+        import os
+        
+        # Get connection details from workspace client
+        connection = sql.connect(
+            server_hostname=w.config.host.replace("https://", ""),
+            http_path="/sql/1.0/warehouses/" + os.environ.get("DATABRICKS_WAREHOUSE_ID", ""),
+            access_token=w.config.token
+        )
+        
+        cursor = connection.cursor()
+        
+        # Load entities
+        cursor.execute("SELECT * FROM research_catalog.healthcare.graphrag_entities")
+        entities_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+        
+        # Load relationships
+        cursor.execute("SELECT * FROM research_catalog.healthcare.graphrag_relationships")
+        relationships_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+        
+        # Load text units
+        cursor.execute("SELECT * FROM research_catalog.healthcare.graphrag_text_units")
+        text_units_df = pd.DataFrame(cursor.fetchall(), columns=[desc[0] for desc in cursor.description])
+        
+        cursor.close()
+        connection.close()
         
         return {
             "entities": entities_df,

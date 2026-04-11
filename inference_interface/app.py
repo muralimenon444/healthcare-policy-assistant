@@ -1,7 +1,7 @@
-# v3.1 - MINIMALIST GEMINI AESTHETIC
+# v3.2 - MINIMALIST GEMINI AESTHETIC
 """
 Last Updated: 2026-04-10 21:00:00
-Version: v3.1 - Minimalist Gemini Design
+Version: v3.2 - Minimalist Gemini Design
 Murali's Medicare Policy Assistant - GraphRAG Demo
 Clean, focused interface with chat-first design
 """
@@ -262,6 +262,70 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.D
     
     return entities_df, relationships_df, text_units_df, common_qas_df, stats_df
 
+
+
+# ============================================================================
+# ON-DEMAND QUERY FUNCTIONS
+# ============================================================================
+
+def query_databricks_for_answer(question: str, entities_df: pd.DataFrame, relationships_df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Query the knowledge graph for answers to questions not in common Q&As.
+    Uses simple entity matching and relationship traversal.
+    """
+    
+    # Extract potential entities from the question
+    question_lower = question.lower()
+    
+    # Find matching entities (case-insensitive partial match)
+    matching_entities = entities_df[
+        entities_df['name'].str.lower().str.contains('|'.join(question_lower.split()), na=False, regex=True)
+    ].head(10)
+    
+    if len(matching_entities) == 0:
+        return {
+            'answer': "I couldn't find specific information about this in the knowledge graph. Try rephrasing your question or ask about Medicare coverage, screening procedures, or specific medical services.",
+            'entities': [],
+            'related_questions': []
+        }
+    
+    # Get entity names
+    entity_names = matching_entities['name'].tolist()
+    
+    # Find relationships involving these entities
+    related_rels = relationships_df[
+        relationships_df['source'].isin(entity_names) | 
+        relationships_df['target'].isin(entity_names)
+    ].head(20)
+    
+    # Build answer from descriptions
+    answer_parts = []
+    
+    # Add entity descriptions
+    for _, entity in matching_entities.head(3).iterrows():
+        if pd.notna(entity.get('description')) and entity['description']:
+            answer_parts.append(f"**{entity['name']}**: {entity['description']}")
+    
+    # Add relationship context
+    if len(related_rels) > 0:
+        answer_parts.append("\n**Related Information:**")
+        for _, rel in related_rels.head(5).iterrows():
+            answer_parts.append(f"• {rel['source']} {rel.get('description', 'relates to')} {rel['target']}")
+    
+    final_answer = "\n\n".join(answer_parts) if answer_parts else "Information found, but details are limited. Please check the official Medicare documentation."
+    
+    # Generate related questions based on entities
+    related_questions = []
+    for entity in entity_names[:3]:
+        related_questions.append(f"What are the requirements for {entity}?")
+        related_questions.append(f"How is {entity} covered under Medicare?")
+    
+    return {
+        'answer': final_answer,
+        'entities': entity_names[:5],
+        'related_questions': related_questions[:6]
+    }
+
 with st.spinner("Loading..."):
     entities_df, relationships_df, text_units_df, common_qas_df, stats_df = load_graphrag_data()
 
@@ -366,13 +430,29 @@ if search_clicked and query:
     else:
         # On-demand query to Databricks
         with st.spinner("Searching knowledge graph..."):
-            st.markdown("### Answer")
-            st.info("⏳ Querying Databricks... (2-3 seconds)")
-            st.caption("💡 This question will be added to the knowledge base for instant answers next time.")
+            result = query_databricks_for_answer(query, entities_df, relationships_df)
+        
+        st.markdown("### Answer")
+        st.write(result['answer'])
+        
+        if result['entities']:
+            st.caption(f"🏷️ Related: {', '.join(result['entities'])}")
+        
+        st.info("💡 This question will be added to the knowledge base for instant answers next time.")
+        
+        # Show related questions
+        if result['related_questions']:
+            st.markdown("#### Related Questions")
+            cols = st.columns(2)
+            for i, rq in enumerate(result['related_questions'][:6]):
+                with cols[i % 2]:
+                    if st.button(rq, key=f"rq_{i}", use_container_width=True):
+                        st.session_state.query = rq
+                        st.rerun()
 
 # ============================================================================
 # FOOTER
 # ============================================================================
 
 st.markdown("<br><br>", unsafe_allow_html=True)
-st.caption(f"Powered by Microsoft GraphRAG • Databricks Unity Catalog • v3.1")
+st.caption(f"Powered by Microsoft GraphRAG • Databricks Unity Catalog • v3.2")

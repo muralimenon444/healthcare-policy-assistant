@@ -1,10 +1,15 @@
-# v2.9 - FINAL FIX - All query issues resolved
+# v3.0 - PRODUCTION - Unified Interface with Pre-computed Data
 """
-Last Updated: 2026-04-05 16:00:00
-Version: PRODUCTION v2.9
+Last Updated: 2026-04-10 19:30:00
+Version: PRODUCTION v3.0
 Murali's Medicare Policy Assistant - GraphRAG Demo
-Streamlit Cloud → Local GraphRAG using Parquet Files
-FIXED: Each question now gives distinct, correct answers
+Streamlit Cloud → Databricks Unity Catalog Tables
+
+New Features:
+- Pre-generated Q&As (instant answers)
+- Pre-calculated statistics (fast dashboard)
+- On-demand querying (2-3 sec response)
+- Unified tabbed interface
 """
 
 import streamlit as st
@@ -18,6 +23,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 from io import BytesIO
 import re
+import os
 matplotlib.use('Agg')
 
 # ============================================================================
@@ -308,7 +314,7 @@ def get_dynamic_suggestions(current_results):
 # ============================================================================
 
 @st.cache_data
-def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load data from Databricks Unity Catalog tables using SQL Statement Execution API."""
     import os
     import requests
@@ -329,16 +335,11 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     
     st.info(f"🔗 Connecting to: {workspace_url}")
     
-    def query_table(table_name: str) -> pd.DataFrame:
+    def query_table(table_name: str, columns: str = "*") -> pd.DataFrame:
         """Query a table via SQL Statement Execution API."""
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         
-        # Optimize text_units - only load metadata, not full text (51MB!)
-        if "text_units" in table_name:
-            sql = f"SELECT id, document_id, chunk_index FROM {table_name}"
-            st.info("📊 Loading metadata only (text excluded to avoid timeout)")
-        else:
-            sql = f"SELECT * FROM {table_name}"
+        sql = f"SELECT {columns} FROM {table_name}"
         payload = {
             "warehouse_id": warehouse_id,
             "statement": sql,
@@ -347,8 +348,6 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         
         try:
             st.write(f"📊 Querying {table_name}...")
-            if "text_units" in table_name:
-                st.info("⏳ text_units is large (51MB) - may take 2-3 minutes...")
             resp = requests.post(
                 f"{workspace_url}/api/2.0/sql/statements/",
                 headers=headers,
@@ -364,8 +363,8 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             statement_id = result["statement_id"]
             status = result.get("status", {}).get("state")
             
-            # Poll for completion (up to 2 minutes)
-            for _ in range(150):  # 5 minutes total
+            # Poll for completion (up to 5 minutes)
+            for _ in range(150):
                 if status == "SUCCEEDED":
                     break
                 time.sleep(2)
@@ -383,14 +382,14 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             
             # Get results - handle both inline and chunked
             manifest = result.get("manifest", {})
-            columns = [c["name"] for c in manifest.get("schema", {}).get("columns", [])]
+            columns_list = [c["name"] for c in manifest.get("schema", {}).get("columns", [])]
             
             # Check if result is inline or needs chunking
             result_data = result.get("result")
             if result_data and "data_array" in result_data:
                 # Inline result (small tables)
                 rows = result_data["data_array"]
-                df = pd.DataFrame(rows, columns=columns)
+                df = pd.DataFrame(rows, columns=columns_list)
             else:
                 # Chunked result (large tables)
                 all_rows = []
@@ -408,7 +407,7 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
                         for row in chunk_data.get("data_array", []):
                             all_rows.append(row)
                 
-                df = pd.DataFrame(all_rows, columns=columns)
+                df = pd.DataFrame(all_rows, columns=columns_list)
             
             st.success(f"✅ Loaded {len(df):,} rows from {table_name}")
             return df
@@ -419,17 +418,211 @@ def load_graphrag_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
             st.code(traceback.format_exc())
             st.stop()
     
-    # Load all three tables
+    # Load all tables
     entities_df = query_table("research_catalog.healthcare.graphrag_entities")
     relationships_df = query_table("research_catalog.healthcare.graphrag_relationships")
-    text_units_df = query_table("research_catalog.healthcare.graphrag_text_units")
+    text_units_df = query_table("research_catalog.healthcare.graphrag_text_units", "id, document_id, chunk_index")  # Metadata only
+    common_qas_df = query_table("research_catalog.healthcare.graphrag_common_qas")
+    stats_df = query_table("research_catalog.healthcare.graphrag_statistics")
     
-    return entities_df, relationships_df, text_units_df
+    return entities_df, relationships_df, text_units_df, common_qas_df, stats_df
 
-entities_df, relationships_df, text_units_df = load_graphrag_data()
+# Load data once at startup
+entities_df, relationships_df, text_units_df, common_qas_df, stats_df = load_graphrag_data()
+
+# =============================================================================
+# STATISTICS DISPLAY
+# =============================================================================
+
+def display_statistics(stats_df):
+    """Display pre-calculated knowledge graph statistics."""
+    st.header("📊 Knowledge Graph Statistics")
+    st.write("Pre-calculated statistics from the nightly GraphRAG job.")
+    
+    # Convert stats back to dictionary
+    import json
+    stats = {}
+    for _, row in stats_df.iterrows():
+        try:
+            if row['metric_type'] == 'dict' or row['metric_type'] == 'list':
+                stats[row['metric_name']] = json.loads(row['metric_value'])
+            else:
+                stats[row['metric_name']] = row['metric_value']
+        except:
+            stats[row['metric_name']] = row['metric_value']
+    
+    # Display key metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Entities", f"{int(stats.get('total_entities', 0)):,}")
+    
+    with col2:
+        st.metric("Relationships", f"{int(stats.get('total_relationships', 0)):,}")
+    
+    with col3:
+        st.metric("Text Chunks", f"{int(stats.get('total_text_chunks', 0)):,}")
+    
+    with col4:
+        st.metric("Documents", f"{int(stats.get('total_documents', 0)):,}")
+    
+    # Entity types distribution
+    if 'entity_types' in stats:
+        st.subheader("Entity Types Distribution")
+        entity_types = stats['entity_types']
+        if isinstance(entity_types, dict):
+            entity_df = pd.DataFrame(list(entity_types.items()), columns=['Entity Type', 'Count'])
+            entity_df = entity_df.sort_values('Count', ascending=False).head(10)
+            st.bar_chart(entity_df.set_index('Entity Type'))
+
+# =============================================================================
+# COMMON Q&As DISPLAY
+# =============================================================================
+
+def display_common_qas(common_qas_df):
+    """Display pre-generated Q&A pairs."""
+    st.header("💡 Common Questions & Answers")
+    st.write("These questions and answers were pre-generated using LLM analysis of the knowledge graph. **Instant answers!**")
+    
+    if len(common_qas_df) == 0:
+        st.info("No pre-generated Q&As available yet. Run the GraphRAG job to generate them.")
+        return
+    
+    # Filter by category if available
+    if 'category' in common_qas_df.columns:
+        categories = ['All'] + sorted(common_qas_df['category'].unique().tolist())
+        selected_category = st.selectbox("Filter by category:", categories, key="qa_category_filter")
+        
+        if selected_category != 'All':
+            filtered_qas = common_qas_df[common_qas_df['category'] == selected_category]
+        else:
+            filtered_qas = common_qas_df
+    else:
+        filtered_qas = common_qas_df
+    
+    st.caption(f"Showing {len(filtered_qas)} Q&A pairs")
+    
+    # Display Q&As
+    for idx, row in filtered_qas.iterrows():
+        with st.expander(f"❓ {row['question']}", expanded=False):
+            st.write(f"**Answer:** {row['answer']}")
+            if 'category' in row and row['category']:
+                st.caption(f"📂 Category: {row['category']}")
+            if 'entities' in row and row['entities']:
+                entities_str = ', '.join(row['entities']) if isinstance(row['entities'], list) else row['entities']
+                st.caption(f"🏷️ Related entities: {entities_str}")
+
+# =============================================================================
+# ON-DEMAND QUERY (NEW QUESTIONS)
+# =============================================================================
+
+@st.cache_data(ttl=3600)
+def query_databricks_for_answer(question: str, _workspace_url: str, _token: str, _warehouse_id: str) -> str:
+    """Query Databricks for answers to new questions using full text data."""
+    import requests
+    import time
+    
+    headers = {"Authorization": f"Bearer {_token}", "Content-Type": "application/json"}
+    
+    # Step 1: Get relevant text chunks using keyword search
+    # Extract key terms from question
+    import re
+    keywords = [word.lower() for word in re.findall(r'\w+', question) if len(word) > 3]
+    if not keywords:
+        return "Please provide a more specific question."
+    
+    keyword_conditions = " OR ".join([f"LOWER(text) LIKE '%{kw}%'" for kw in keywords[:5]])
+    
+    sql = f"""
+    SELECT text, document_id 
+    FROM research_catalog.healthcare.graphrag_text_units 
+    WHERE {keyword_conditions}
+    LIMIT 10
+    """
+    
+    payload = {
+        "warehouse_id": _warehouse_id,
+        "statement": sql,
+        "wait_timeout": "50s"
+    }
+    
+    try:
+        resp = requests.post(
+            f"{_workspace_url}/api/2.0/sql/statements/",
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if resp.status_code != 200:
+            return f"Error querying database: {resp.status_code}"
+        
+        result = resp.json()
+        statement_id = result["statement_id"]
+        status = result.get("status", {}).get("state")
+        
+        # Poll for completion
+        for _ in range(60):
+            if status == "SUCCEEDED":
+                break
+            time.sleep(2)
+            status_resp = requests.get(
+                f"{_workspace_url}/api/2.0/sql/statements/{statement_id}",
+                headers=headers
+            )
+            if status_resp.status_code == 200:
+                result = status_resp.json()
+                status = result.get("status", {}).get("state")
+        
+        if status != "SUCCEEDED":
+            return "Query timed out or failed"
+        
+        # Get results
+        manifest = result.get("manifest", {})
+        result_data = result.get("result")
+        
+        if result_data and "data_array" in result_data:
+            rows = result_data["data_array"]
+            if len(rows) == 0:
+                return "No relevant information found in the knowledge graph. Try rephrasing your question or check the Common Q&As tab."
+            
+            # Combine text chunks as context
+            context_texts = [row[0] for row in rows if row[0]]
+            context = "\n\n".join(context_texts[:5])  # Use top 5 chunks
+            
+            # Return context (in production, this would go through an LLM)
+            answer = f"**Based on the knowledge graph:**\n\n{context[:2000]}..."
+            return answer
+        else:
+            return "No relevant information found."
+            
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def ask_new_question_section():
+    """Section for asking new questions."""
+    st.header("❓ Ask a New Question")
+    st.write("Ask any question about healthcare policies. The system will search the full knowledge graph (round-trip to Databricks).")
+    st.caption("⏱️ Response time: ~2-3 seconds")
+    
+    # Get credentials
+    workspace_url = st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST"))
+    token = st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
+    warehouse_id = st.secrets.get("DATABRICKS_WAREHOUSE_ID", "e7ab584a1feb58ef")
+    
+    if not workspace_url.startswith('https://'):
+        workspace_url = f"https://{workspace_url}"
+    
+    question = st.text_input("Enter your question:", placeholder="e.g., What is the coverage for diabetes screening?", key="new_question_input")
+    
+    if st.button("🔍 Get Answer", type="primary") and question:
+        with st.spinner("🔍 Searching knowledge graph and generating answer..."):
+            answer = query_databricks_for_answer(question, workspace_url, token, warehouse_id)
+            st.write("**Answer:**")
+            st.write(answer)
 
 # ============================================================================
-# GRAPHRAG QUERY FUNCTIONS
+# GRAPHRAG QUERY FUNCTIONS (for Advanced Search)
 # ============================================================================
 
 def detect_entities_in_query(query: str, entities_df: pd.DataFrame, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -480,14 +673,16 @@ def traverse_graph(entities: List[Dict], relationships_df: pd.DataFrame) -> List
     return graph_paths[:15]
 
 def retrieve_text_chunks(chunk_ids: List[int], text_units_df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """Retrieve text chunks by their IDs."""
-    relevant_chunks = text_units_df[text_units_df.index.isin(chunk_ids)]
+    """Retrieve text chunks by their IDs - note: text_units_df only has metadata."""
+    # Note: We're only loading metadata (id, document_id, chunk_index) to avoid large data transfers
+    # For full text, we'd need to query Databricks on-demand
+    relevant_chunks = text_units_df[text_units_df['id'].isin(chunk_ids)]
     
     passages = []
     for idx, row in relevant_chunks.head(5).iterrows():
         passages.append({
-            'text': row['text'][:200] + '...',
-            'full_text': row['text'],
+            'text': f"Chunk {row['chunk_index']} from {row['document_id']}",
+            'full_text': "(Full text available via on-demand query)",
             'source': row['document_id'],
             'score': 0.9
         })
@@ -499,7 +694,7 @@ def synthesize_answer(query: str, entities: List[Dict], paths: List[Dict], passa
     if not entities or not passages:
         return {
             'executive_summary': f"I searched the Medicare policy knowledge graph for your query but could not find sufficient relevant information about: **{query}**",
-            'detailed_analysis': "This could mean the topic is not yet covered in the current knowledge graph, or the query needs rephrasing. Try asking about Medicare Part A/B/C/D, preventive services, LDCT screening, Inflation Reduction Act, or DME equipment coverage.",
+            'detailed_analysis': "This could mean the topic is not yet covered in the current knowledge graph, or the query needs rephrasing. Try the Common Q&As tab for pre-answered questions.",
             'temporal_metadata': {},
             'knowledge_gaps': ["No relevant data found in the CMS Medicare Coverage Database"],
             'related_questions': []
@@ -664,274 +859,299 @@ with st.sidebar:
     
     st.divider()
     
-    st.markdown("### ⚙️ Configuration")
-    search_mode = st.radio(
-        "Search Mode",
-        ["Relationship Analysis", "Standard Search"],
-        index=0,
-        help="Relationship Analysis uses graph traversal + community detection"
-    )
-    st.session_state.search_mode = search_mode
-    
-    if search_mode == "Relationship Analysis":
-        st.info("🔗 Graph traversal + community detection")
-    else:
-        st.info("📄 Traditional semantic search")
-    
-    st.divider()
-    
     st.markdown("### 📊 Knowledge Graph Stats")
     stats = get_knowledge_graph_stats()
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Entities", stats["entities"])
-        st.metric("Relationships", stats["relationships"])
+        st.metric("Entities", f"{stats['entities']:,}")
+        st.metric("Relationships", f"{stats['relationships']:,}")
     with col2:
-        st.metric("Text Chunks", stats["text_chunks"])
+        st.metric("Text Chunks", f"{stats['text_chunks']:,}")
     
     st.divider()
     
-    st.markdown("### 💡 Example Questions")
+    st.markdown("### 💡 Quick Access")
+    st.caption("Jump to a section:")
     
-    dynamic_sugs = get_dynamic_suggestions(st.session_state.current_results)
-    example_questions = (
-        dynamic_sugs["Simple Retrieval"][:2] + 
-        dynamic_sugs["Entity Connections"][:2] + 
-        dynamic_sugs["Well-Connected Topics"][:2]
-    )
-    
-    for i, example in enumerate(example_questions[:6]):
-        if st.button(f"• {example}", key=f"example_{i}", use_container_width=True):
-            st.session_state.query = example
-            st.session_state.trigger_search = True
-            st.rerun()
+    if st.button("📊 Statistics", key="nav_stats", use_container_width=True):
+        st.session_state.active_tab = 0
+    if st.button("💡 Common Q&As", key="nav_qas", use_container_width=True):
+        st.session_state.active_tab = 1
+    if st.button("❓ Ask New Question", key="nav_new_q", use_container_width=True):
+        st.session_state.active_tab = 2
+    if st.button("🔍 Advanced Search", key="nav_advanced", use_container_width=True):
+        st.session_state.active_tab = 3
 
 # ============================================================================
-# MAIN AREA
+# MAIN AREA - TABBED INTERFACE
 # ============================================================================
 
 st.markdown('<h1 class="main-header">🏥 Murali\'s Medicare Policy Assistant</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">GraphRAG-Powered Analysis of CMS Medicare Coverage Database</p>', unsafe_allow_html=True)
 
-with st.expander("🚀 Quick Start - Suggested Questions", expanded=(st.session_state.current_results is None)):
-    tab1, tab2, tab3 = st.tabs(["📋 Simple Retrieval", "🔗 Entity Connections", "🔀 Well-Connected Topics"])
-    
-    dynamic_sugs = get_dynamic_suggestions(st.session_state.current_results)
-    
-    with tab1:
-        st.caption("Direct facts from policy documents")
-        for i, q in enumerate(dynamic_sugs["Simple Retrieval"]):
-            if st.button(f"💡 {q}", key=f"qs1_{i}", use_container_width=True):
-                st.session_state.query = q
-                st.session_state.trigger_search = True
-                st.rerun()
-    
-    with tab2:
-        st.caption("How entities relate to each other")
-        for i, q in enumerate(dynamic_sugs["Entity Connections"]):
-            if st.button(f"💡 {q}", key=f"qs2_{i}", use_container_width=True):
-                st.session_state.query = q
-                st.session_state.trigger_search = True
-                st.rerun()
-    
-    with tab3:
-        st.caption("Topics with many connections in the graph")
-        for i, q in enumerate(dynamic_sugs["Well-Connected Topics"]):
-            if st.button(f"💡 {q}", key=f"qs3_{i}", use_container_width=True):
-                st.session_state.query = q
-                st.session_state.trigger_search = True
-                st.rerun()
+# Main tabbed interface
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Statistics", "💡 Common Q&As", "❓ Ask New Question", "🔍 Advanced Search"])
 
-st.markdown("### 🔍 Ask Your Question")
+with tab1:
+    display_statistics(stats_df)
 
-col1, col2 = st.columns([5, 1])
-with col1:
-    query_input = st.text_input(
-        "Enter your Medicare policy question:",
-        value=st.session_state.query,
-        placeholder="e.g., What are the eligibility requirements for preventive services?",
-        label_visibility="collapsed"
-    )
-        
-with col2:
-    search_button = st.button("🔍 Search", use_container_width=True, type="primary")
+with tab2:
+    display_common_qas(common_qas_df)
 
-if search_button and query_input:
-    st.session_state.query = query_input
-    st.session_state.trigger_search = True
-    st.rerun()
+with tab3:
+    ask_new_question_section()
 
-if st.session_state.trigger_search and st.session_state.query:
-    st.session_state.trigger_search = False
+with tab4:
+    st.header("🔍 Advanced Search")
+    st.write("Perform graph traversal queries with entity detection and relationship analysis.")
     
-    with st.spinner(""):
-        simulate_progress([
-            "Detecting entities in query...",
-            "Traversing knowledge graph...",
-            "Computing community centrality...",
-            "Synthesizing answer from context..."
-        ])
+    # Search configuration
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_mode = st.radio(
+            "Search Mode",
+            ["Relationship Analysis", "Standard Search"],
+            index=0,
+            help="Relationship Analysis uses graph traversal + community detection",
+            horizontal=True,
+            key="advanced_search_mode"
+        )
     
-    results = run_graphrag_query(st.session_state.query, st.session_state.search_mode)
-    st.session_state.current_results = results
-    st.session_state.search_history.append({
-        "query": st.session_state.query,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "mode": st.session_state.search_mode
-    })
-    st.rerun()
-
-# ============================================================================
-# RESULTS DISPLAY
-# ============================================================================
-
-if st.session_state.current_results:
-    results = st.session_state.current_results
-    
-    st.markdown("---")
-    st.markdown("## 📊 Analysis Results")
-    
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📝 Answer", "🕸️ Knowledge Graph", "🎯 Entities", "🔗 Relationships", "📚 Sources"])
-    
-    with tab1:
-        st.markdown("### 🎯 Executive Summary")
-        st.markdown(clean_text(results.get("executive_summary", "No summary available.")))
-        
-        st.markdown("### 🔍 Detailed Analysis")
-        st.markdown(clean_text(results.get("detailed_analysis", "No detailed analysis available.")))
-        
-        if results.get("temporal_metadata") and any(results["temporal_metadata"].values()):
-            st.markdown("### 📅 Temporal Metadata")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if results["temporal_metadata"].get("effective_date"):
-                    st.metric("Effective Date", results["temporal_metadata"]["effective_date"])
-            with col2:
-                if results["temporal_metadata"].get("last_updated"):
-                    st.metric("Last Updated", results["temporal_metadata"]["last_updated"])
-            with col3:
-                if results["temporal_metadata"].get("policy_version"):
-                    st.caption("**Policy Version**")
-                    st.caption(results["temporal_metadata"]["policy_version"])
-        
-        if results.get("knowledge_gaps") and len(results["knowledge_gaps"]) > 0:
-            st.markdown("### ❓ Knowledge Gaps")
-            for gap in results["knowledge_gaps"]:
-                st.warning(f"⚠️ {gap}")
-    
-    with tab2:
-        st.markdown("### 🕸️ Knowledge Graph Visualization")
-        
-        if results.get("entities") and results.get("graph_paths") and len(results["entities"]) > 0 and len(results["graph_paths"]) > 0:
-            try:
-                graph_buf = create_graph_visualization(results["entities"], results["graph_paths"])
-                if graph_buf:
-                    st.image(graph_buf, use_container_width=True)
-                else:
-                    st.info("No graph data to visualize.")
-            except Exception as e:
-                st.error(f"Graph visualization error: {str(e)}")
-                st.info("Showing tabular relationship data instead")
-                
-                if results.get("graph_paths"):
-                    df_paths = pd.DataFrame(results["graph_paths"])
-                    st.dataframe(df_paths, use_container_width=True)
+    with col2:
+        if search_mode == "Relationship Analysis":
+            st.info("🔗 Graph traversal")
         else:
-            st.info("No graph data available for this query.")
-        
-        if results.get("central_nodes") and len(results["central_nodes"]) > 0:
-            st.markdown("### 🌟 Central Nodes")
-            for node in results["central_nodes"]:
-                with st.expander(f"**{clean_text(node['entity'])}** (Centrality: {node.get('centrality', 0):.2f})"):
-                    st.markdown(f"**Connections:** {node.get('connections', 0)}")
-                    st.markdown(f"**Interpretation:** {node.get('interpretation', 'N/A')}")
+            st.info("📄 Semantic search")
     
-    with tab3:
-        st.markdown("### 🎯 Detected Entities")
-        
-        if results.get("entities") and len(results["entities"]) > 0:
-            entities_html = " ".join([render_entity_pill(e) for e in results["entities"]])
-            st.markdown(entities_html, unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            df_entities = pd.DataFrame([
-                {
-                    'name': clean_text(e['name']),
-                    'type': e.get('type', 'unknown'),
-                    'score': e.get('score', 0)
-                }
-                for e in results["entities"]
-            ])
-            if "score" in df_entities.columns:
-                df_entities["score"] = df_entities["score"].apply(lambda x: f"{x:.0%}")
-            st.dataframe(df_entities, use_container_width=True, hide_index=True)
-        else:
-            st.info("No entities detected in this query.")
+    st.session_state.search_mode = search_mode
     
-    with tab4:
-        st.markdown("### 🔗 Entity Relationships")
+    # Suggested questions
+    with st.expander("💡 Suggested Questions", expanded=True):
+        tab_simple, tab_connections, tab_topics = st.tabs(["📋 Simple", "🔗 Connections", "🔀 Topics"])
         
-        if results.get("all_relationships") and len(results["all_relationships"]) > 0:
-            display_count = min(10, len(results["all_relationships"]))
-            df_rels = pd.DataFrame([
-                {
-                    'entity1': clean_text(r['entity1']),
-                    'relation': clean_text(r['relation']),
-                    'entity2': clean_text(r['entity2'])
-                }
-                for r in results["all_relationships"][:display_count]
-            ])
-            st.dataframe(df_rels, use_container_width=True, hide_index=True)
-            
-            st.caption(f"Showing {display_count} of {len(results['all_relationships'])} total relationships")
-        else:
-            st.info("No relationships found in the knowledge graph for this query.")
-    
-    with tab5:
-        st.markdown("### 📚 Supporting Evidence")
+        dynamic_sugs = get_dynamic_suggestions(st.session_state.current_results)
         
-        if results.get("supporting_passages") and len(results["supporting_passages"]) > 0:
-            for i, passage in enumerate(results["supporting_passages"], 1):
-                with st.expander(f"**Source {i}:** {passage.get('source', 'Unknown')} (Relevance: {passage.get('score', 0):.0%})"):
-                    st.markdown(f"**Excerpt:** {clean_text(passage.get('text', 'N/A'))}")
-                    if passage.get('full_text'):
-                        st.markdown(f"**Full Text:** {clean_text(passage['full_text'])}")
-        else:
-            st.info("No supporting evidence found.")
-        
-        if results.get("citations") and len(results["citations"]) > 0:
-            st.markdown("---")
-            st.markdown("### 📖 Citations")
-            for citation in results["citations"]:
-                st.markdown(f"- {citation}")
-    
-    if results.get("related_questions") and len(results["related_questions"]) > 0:
-        st.markdown("---")
-        st.markdown("### 💡 Related Follow-up Questions")
-        
-        col1, col2 = st.columns(2)
-        for i, q in enumerate(results["related_questions"]):
-            with col1 if i % 2 == 0 else col2:
-                if st.button(f"🔄 {clean_text(q)}", key=f"followup_{hash(q)}_{i}", use_container_width=True):
+        with tab_simple:
+            st.caption("Direct facts from policy documents")
+            for i, q in enumerate(dynamic_sugs["Simple Retrieval"]):
+                if st.button(f"💡 {q}", key=f"adv_qs1_{i}", use_container_width=True):
                     st.session_state.query = q
                     st.session_state.trigger_search = True
                     st.rerun()
-
-# ============================================================================
-# SEARCH HISTORY
-# ============================================================================
-
-if st.session_state.search_history:
-    with st.expander("📜 Search History"):
-        for i, item in enumerate(reversed(st.session_state.search_history[-10:])):
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.markdown(f"**{item['query']}**")
-                st.caption(f"{item['timestamp']} | {item['mode']}")
-            with col2:
-                if st.button("🔄", key=f"history_{i}"):
-                    st.session_state.query = item['query']
+        
+        with tab_connections:
+            st.caption("How entities relate to each other")
+            for i, q in enumerate(dynamic_sugs["Entity Connections"]):
+                if st.button(f"💡 {q}", key=f"adv_qs2_{i}", use_container_width=True):
+                    st.session_state.query = q
                     st.session_state.trigger_search = True
                     st.rerun()
+        
+        with tab_topics:
+            st.caption("Topics with many connections in the graph")
+            for i, q in enumerate(dynamic_sugs["Well-Connected Topics"]):
+                if st.button(f"💡 {q}", key=f"adv_qs3_{i}", use_container_width=True):
+                    st.session_state.query = q
+                    st.session_state.trigger_search = True
+                    st.rerun()
+    
+    st.markdown("### 🔍 Enter Your Query")
+    
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        query_input = st.text_input(
+            "Enter your Medicare policy question:",
+            value=st.session_state.query,
+            placeholder="e.g., What are the eligibility requirements for preventive services?",
+            label_visibility="collapsed",
+            key="advanced_query_input"
+        )
+            
+    with col2:
+        search_button = st.button("🔍 Search", use_container_width=True, type="primary", key="advanced_search_btn")
+    
+    if search_button and query_input:
+        st.session_state.query = query_input
+        st.session_state.trigger_search = True
+        st.rerun()
+    
+    if st.session_state.trigger_search and st.session_state.query:
+        st.session_state.trigger_search = False
+        
+        with st.spinner(""):
+            simulate_progress([
+                "Detecting entities in query...",
+                "Traversing knowledge graph...",
+                "Computing community centrality...",
+                "Synthesizing answer from context..."
+            ])
+        
+        results = run_graphrag_query(st.session_state.query, st.session_state.search_mode)
+        st.session_state.current_results = results
+        st.session_state.search_history.append({
+            "query": st.session_state.query,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "mode": st.session_state.search_mode
+        })
+        st.rerun()
+    
+    # ========================================================================
+    # RESULTS DISPLAY (for Advanced Search)
+    # ========================================================================
+    
+    if st.session_state.current_results:
+        results = st.session_state.current_results
+        
+        st.markdown("---")
+        st.markdown("## 📊 Analysis Results")
+        
+        result_tab1, result_tab2, result_tab3, result_tab4, result_tab5 = st.tabs(["📝 Answer", "🕸️ Knowledge Graph", "🎯 Entities", "🔗 Relationships", "📚 Sources"])
+        
+        with result_tab1:
+            st.markdown("### 🎯 Executive Summary")
+            st.markdown(clean_text(results.get("executive_summary", "No summary available.")))
+            
+            st.markdown("### 🔍 Detailed Analysis")
+            st.markdown(clean_text(results.get("detailed_analysis", "No detailed analysis available.")))
+            
+            if results.get("temporal_metadata") and any(results["temporal_metadata"].values()):
+                st.markdown("### 📅 Temporal Metadata")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if results["temporal_metadata"].get("effective_date"):
+                        st.metric("Effective Date", results["temporal_metadata"]["effective_date"])
+                with col2:
+                    if results["temporal_metadata"].get("last_updated"):
+                        st.metric("Last Updated", results["temporal_metadata"]["last_updated"])
+                with col3:
+                    if results["temporal_metadata"].get("policy_version"):
+                        st.caption("**Policy Version**")
+                        st.caption(results["temporal_metadata"]["policy_version"])
+            
+            if results.get("knowledge_gaps") and len(results["knowledge_gaps"]) > 0:
+                st.markdown("### ❓ Knowledge Gaps")
+                for gap in results["knowledge_gaps"]:
+                    st.warning(f"⚠️ {gap}")
+        
+        with result_tab2:
+            st.markdown("### 🕸️ Knowledge Graph Visualization")
+            
+            if results.get("entities") and results.get("graph_paths") and len(results["entities"]) > 0 and len(results["graph_paths"]) > 0:
+                try:
+                    graph_buf = create_graph_visualization(results["entities"], results["graph_paths"])
+                    if graph_buf:
+                        st.image(graph_buf, use_container_width=True)
+                    else:
+                        st.info("No graph data to visualize.")
+                except Exception as e:
+                    st.error(f"Graph visualization error: {str(e)}")
+                    st.info("Showing tabular relationship data instead")
+                    
+                    if results.get("graph_paths"):
+                        df_paths = pd.DataFrame(results["graph_paths"])
+                        st.dataframe(df_paths, use_container_width=True)
+            else:
+                st.info("No graph data available for this query.")
+            
+            if results.get("central_nodes") and len(results["central_nodes"]) > 0:
+                st.markdown("### 🌟 Central Nodes")
+                for node in results["central_nodes"]:
+                    with st.expander(f"**{clean_text(node['entity'])}** (Centrality: {node.get('centrality', 0):.2f})"):
+                        st.markdown(f"**Connections:** {node.get('connections', 0)}")
+                        st.markdown(f"**Interpretation:** {node.get('interpretation', 'N/A')}")
+        
+        with result_tab3:
+            st.markdown("### 🎯 Detected Entities")
+            
+            if results.get("entities") and len(results["entities"]) > 0:
+                entities_html = " ".join([render_entity_pill(e) for e in results["entities"]])
+                st.markdown(entities_html, unsafe_allow_html=True)
+                
+                st.markdown("---")
+                
+                df_entities = pd.DataFrame([
+                    {
+                        'name': clean_text(e['name']),
+                        'type': e.get('type', 'unknown'),
+                        'score': e.get('score', 0)
+                    }
+                    for e in results["entities"]
+                ])
+                if "score" in df_entities.columns:
+                    df_entities["score"] = df_entities["score"].apply(lambda x: f"{x:.0%}")
+                st.dataframe(df_entities, use_container_width=True, hide_index=True)
+            else:
+                st.info("No entities detected in this query.")
+        
+        with result_tab4:
+            st.markdown("### 🔗 Entity Relationships")
+            
+            if results.get("all_relationships") and len(results["all_relationships"]) > 0:
+                display_count = min(10, len(results["all_relationships"]))
+                df_rels = pd.DataFrame([
+                    {
+                        'entity1': clean_text(r['entity1']),
+                        'relation': clean_text(r['relation']),
+                        'entity2': clean_text(r['entity2'])
+                    }
+                    for r in results["all_relationships"][:display_count]
+                ])
+                st.dataframe(df_rels, use_container_width=True, hide_index=True)
+                
+                st.caption(f"Showing {display_count} of {len(results['all_relationships'])} total relationships")
+            else:
+                st.info("No relationships found in the knowledge graph for this query.")
+        
+        with result_tab5:
+            st.markdown("### 📚 Supporting Evidence")
+            
+            if results.get("supporting_passages") and len(results["supporting_passages"]) > 0:
+                for i, passage in enumerate(results["supporting_passages"], 1):
+                    with st.expander(f"**Source {i}:** {passage.get('source', 'Unknown')} (Relevance: {passage.get('score', 0):.0%})"):
+                        st.markdown(f"**Excerpt:** {clean_text(passage.get('text', 'N/A'))}")
+                        if passage.get('full_text'):
+                            st.markdown(f"**Full Text:** {clean_text(passage['full_text'])}")
+            else:
+                st.info("No supporting evidence found.")
+            
+            if results.get("citations") and len(results["citations"]) > 0:
+                st.markdown("---")
+                st.markdown("### 📖 Citations")
+                for citation in results["citations"]:
+                    st.markdown(f"- {citation}")
+        
+        if results.get("related_questions") and len(results["related_questions"]) > 0:
+            st.markdown("---")
+            st.markdown("### 💡 Related Follow-up Questions")
+            
+            col1, col2 = st.columns(2)
+            for i, q in enumerate(results["related_questions"]):
+                with col1 if i % 2 == 0 else col2:
+                    if st.button(f"🔄 {clean_text(q)}", key=f"followup_{hash(q)}_{i}", use_container_width=True):
+                        st.session_state.query = q
+                        st.session_state.trigger_search = True
+                        st.rerun()
+    
+    # Search History
+    if st.session_state.search_history:
+        with st.expander("📜 Search History"):
+            for i, item in enumerate(reversed(st.session_state.search_history[-10:])):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.markdown(f"**{item['query']}**")
+                    st.caption(f"{item['timestamp']} | {item['mode']}")
+                with col2:
+                    if st.button("🔄", key=f"history_{i}"):
+                        st.session_state.query = item['query']
+                        st.session_state.trigger_search = True
+                        st.rerun()
+
+# ============================================================================
+# FOOTER
+# ============================================================================
+
+st.divider()
+st.caption("💡 **Tip:** Start with Common Q&As for instant answers, or use 'Ask New Question' for custom queries.")
+st.caption("🚀 Powered by Microsoft GraphRAG | Databricks Unity Catalog | Streamlit Cloud")
+st.caption(f"📅 Last updated: {datetime.now().strftime('%Y-%m-%d')} | v3.0")

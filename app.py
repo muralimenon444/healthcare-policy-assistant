@@ -200,15 +200,32 @@ def initialize_openai_client():
 
 @st.cache_data
 def load_knowledge_graph():
-    """Load knowledge graph data from Unity Catalog Volumes."""
+    """Load knowledge graph data from local data directory or Volume fallback."""
+    
+    # Try local data directory first (bundled with app)
+    local_path = os.path.join(os.path.dirname(__file__), "data")
+    volume_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
+    
+    # Determine which path to use
+    if os.path.exists(local_path) and os.path.exists(f"{local_path}/entities.parquet"):
+        data_path = local_path
+        st.info(f"📂 Loading data from bundled directory: {data_path}")
+    elif os.path.exists(volume_path):
+        data_path = volume_path
+        st.info(f"📂 Loading data from Volume: {data_path}")
+    else:
+        st.error("❌ Cannot find GraphRAG data files!")
+        st.error(f"Checked: {local_path}")
+        st.error(f"Checked: {volume_path}")
+        return None
+    
     try:
-        # Direct path to GraphRAG output files in Unity Catalog Volumes
-        output_path = "/Volumes/research_catalog/healthcare/policy_docs/output"
-        
         # Load the parquet files
-        entities_df = pd.read_parquet(f"{output_path}/entities.parquet")
-        relationships_df = pd.read_parquet(f"{output_path}/relationships.parquet")
-        text_units_df = pd.read_parquet(f"{output_path}/text_units.parquet")
+        entities_df = pd.read_parquet(f"{data_path}/entities.parquet")
+        relationships_df = pd.read_parquet(f"{data_path}/relationships.parquet")
+        text_units_df = pd.read_parquet(f"{data_path}/text_units.parquet")
+        
+        st.success(f"✅ Loaded {len(entities_df)} entities, {len(relationships_df)} relationships, {len(text_units_df)} text units")
         
         return {
             "entities": entities_df,
@@ -218,8 +235,6 @@ def load_knowledge_graph():
         }
     except Exception as e:
         st.error(f"Error loading knowledge graph: {e}")
-        st.error(f"Expected path: /Volumes/research_catalog/healthcare/policy_docs/output/")
-        st.info("Please ensure GraphRAG output files exist in the Volume.")
         return None
 
 # ============================================================================
